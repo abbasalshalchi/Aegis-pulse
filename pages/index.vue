@@ -63,9 +63,7 @@ function openItem(item) {
 
 <template>
   <div class="relative h-full w-full">
-    <section
-      class="flex h-full w-full items-center justify-center p-4 pb-40 sm:pb-6 [container-type:size]"
-    >
+    <section class="flex h-full w-full items-center justify-center p-4 pb-40 sm:pb-6 [container-type:size]">
       <div class="relative aspect-[5/6] w-[min(100cqw,83.3cqh)]">
         <svg viewBox="0 0 100 120" class="h-full w-full select-none" role="img" aria-label="Network map of Iraq">
           <defs>
@@ -75,48 +73,22 @@ function openItem(item) {
           </defs>
 
           <!-- Landmass (zooms on governorate select) -->
-          <g
-            class="transition-transform duration-700 ease-out [transform-box:view-box]"
-            :style="zoomStyle"
-          >
+          <g class="transition-transform duration-700 ease-out [transform-box:view-box]" :style="zoomStyle">
             <path :d="IRAQ_PATH" class="fill-zain-dark-raised stroke-zain-accent/60" stroke-width="0.6" />
             <path :d="IRAQ_PATH" fill="url(#mapgrid)" />
           </g>
 
           <!-- Governorate markers -->
           <g v-if="!store.activeState">
-            <g
-              v-for="state in store.states"
-              :key="state.id"
-              class="cursor-pointer"
-              @click="store.selectState(state.id)"
-              @mouseenter="hoveredId = state.id"
-              @mouseleave="hoveredId = null"
-            >
-              <circle
-                :cx="state.map.x"
-                :cy="state.map.y"
-                :r="hoveredId === state.id ? 4.2 : 3"
-                fill="none"
-                class="stroke-zain-accent-bright transition-all"
-                stroke-width="0.5"
-              />
+            <g v-for="state in store.states" :key="state.id" class="cursor-pointer" @click="store.selectState(state.id)"
+              @mouseenter="hoveredId = state.id" @mouseleave="hoveredId = null">
+              <circle :cx="state.map.x" :cy="state.map.y" :r="hoveredId === state.id ? 4.2 : 3" fill="none"
+                class="stroke-zain-accent-bright transition-all" stroke-width="0.5" />
               <circle :cx="state.map.x" :cy="state.map.y" r="1.2" class="fill-zain-sand" />
-              <circle
-                v-if="store.stateStatus(state.id) !== 'ok'"
-                :cx="state.map.x + 3"
-                :cy="state.map.y - 3"
-                r="1.1"
-                class="animate-pulse-dot"
-                :fill="STROKE[store.stateStatus(state.id)]"
-              />
-              <text
-                :x="state.map.x"
-                :y="state.map.y + 7.5"
-                text-anchor="middle"
-                class="fill-zain-light/70 uppercase"
-                style="font-size: 2.8px; letter-spacing: 0.08em"
-              >
+              <circle v-if="store.stateStatus(state.id) !== 'ok'" :cx="state.map.x + 3" :cy="state.map.y - 3" r="1.1"
+                class="animate-pulse-dot" :fill="STROKE[store.stateStatus(state.id)]" />
+              <text :x="state.map.x" :y="state.map.y + 7.5" text-anchor="middle" class="fill-zain-light/70 uppercase"
+                style="font-size: 2.8px; letter-spacing: 0.08em">
                 {{ state.name }}
               </text>
             </g>
@@ -124,36 +96,16 @@ function openItem(item) {
 
           <!-- Tower markers within the zoomed governorate -->
           <g v-else>
-            <g
-              v-for="tower in store.towersInActiveState"
-              :key="tower.id"
-              class="cursor-pointer"
+            <g v-for="tower in store.towersInActiveState" :key="tower.id" class="cursor-pointer"
               :transform="`translate(${projected(tower.map).x} ${projected(tower.map).y})`"
-              @click="navigateTo(`/tower/${tower.id}`)"
-              @mouseenter="hoveredId = tower.id"
-              @mouseleave="hoveredId = null"
-            >
-              <circle
-                v-if="store.towerStatus(tower) !== 'ok'"
-                r="5"
-                fill="none"
-                :stroke="STROKE[store.towerStatus(tower)]"
-                stroke-width="0.4"
-                class="animate-pulse-dot"
-              />
-              <path
-                d="M0 -4.4 L-3 3.6 H3 Z"
-                fill="none"
-                :stroke="STROKE[store.towerStatus(tower)]"
-                :stroke-width="hoveredId === tower.id ? 1 : 0.6"
-                class="transition-all"
-              />
-              <text
-                y="7.5"
-                text-anchor="middle"
-                class="fill-zain-light/80"
-                style="font-size: 2.4px; letter-spacing: 0.05em"
-              >
+              @click="navigateTo(`/tower/${tower.id}`)" @mouseenter="hoveredId = tower.id"
+              @mouseleave="hoveredId = null">
+              <circle v-if="store.towerStatus(tower) !== 'ok'" r="5" fill="none"
+                :stroke="STROKE[store.towerStatus(tower)]" stroke-width="0.4" class="animate-pulse-dot" />
+              <path d="M0 -4.4 L-3 3.6 H3 Z" fill="none" :stroke="STROKE[store.towerStatus(tower)]"
+                :stroke-width="hoveredId === tower.id ? 1 : 0.6" class="transition-all" />
+              <text y="7.5" text-anchor="middle" class="fill-zain-light/80"
+                style="font-size: 2.4px; letter-spacing: 0.05em">
                 {{ tower.id }}
               </text>
             </g>
@@ -164,12 +116,9 @@ function openItem(item) {
 
     <!-- Scope chip -->
     <div class="absolute left-4 top-4 flex items-center gap-2">
-      <button
-        v-if="store.activeState"
-        type="button"
+      <button v-if="store.activeState" type="button"
         class="rounded border border-zain-accent/40 bg-zain-dark-raised px-2 py-1 text-[10px] uppercase tracking-wider text-zain-sand transition-colors hover:border-zain-accent"
-        @click="store.clearState()"
-      >
+        @click="store.clearState()">
         ◂ All governorates
       </button>
       <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-zain-light/50">
@@ -179,23 +128,17 @@ function openItem(item) {
 
     <!-- Synchronized list card (same data as the markers) -->
     <aside
-      class="absolute bottom-4 left-4 w-72 max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-zain-accent/25 bg-zain-dark-raised/90 backdrop-blur"
-    >
+      class="absolute bottom-4 left-4 w-72 max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-zain-accent/25 bg-zain-dark-raised/90 backdrop-blur">
       <header class="border-b border-zain-accent/15 px-3 py-2">
         <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-zain-accent-bright">
           {{ store.activeState ? `${store.activeState.name} — sites` : 'Governorates' }}
         </p>
       </header>
-      <ul class="max-h-48 overflow-y-auto">
+      <ul class="no-scrollbar max-h-48 overflow-y-auto">
         <li v-for="item in listItems" :key="item.id">
-          <button
-            type="button"
-            class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors"
+          <button type="button" class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors"
             :class="hoveredId === item.id ? 'bg-zain-accent/15' : 'hover:bg-zain-accent/10'"
-            @mouseenter="hoveredId = item.id"
-            @mouseleave="hoveredId = null"
-            @click="openItem(item)"
-          >
+            @mouseenter="hoveredId = item.id" @mouseleave="hoveredId = null" @click="openItem(item)">
             <span class="status-dot" :class="`status-dot--${item.status}`" />
             <span class="min-w-0">
               <span class="block truncate text-zain-light/90">{{ item.label }}</span>

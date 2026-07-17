@@ -35,42 +35,29 @@ onUnmounted(() => clearInterval(jitterTimer))
 
     <!-- Desktop: synchronized side panel -->
     <aside
-      class="hidden w-96 shrink-0 overflow-y-auto border-l border-zain-accent/15 bg-zain-dark-raised lg:block"
-    >
+      class="no-scrollbar hidden w-96 shrink-0 overflow-y-auto border-l border-zain-accent/15 bg-zain-dark-raised lg:block">
       <PropertyPanel />
     </aside>
 
     <!-- Mobile: synchronized bottom sheet -->
     <div class="fixed inset-x-0 bottom-0 z-40 lg:hidden">
       <div
-        class="mx-auto max-w-xl rounded-t-2xl border border-b-0 border-zain-accent/25 bg-zain-dark-raised/95 backdrop-blur"
-      >
-        <button
-          type="button"
-          class="flex w-full items-center gap-3 px-4 py-3"
-          @click="sheetOpen = !sheetOpen"
-        >
+        class="mx-auto max-w-xl rounded-t-2xl border border-b-0 border-zain-accent/25 bg-zain-dark-raised/95 backdrop-blur">
+        <button type="button" class="flex w-full items-center gap-3 px-4 py-3" @click="sheetOpen = !sheetOpen">
           <span class="h-1 w-8 rounded-full bg-zain-accent/50" />
           <span class="text-xs font-semibold uppercase tracking-wider text-zain-sand">
             Site telemetry
           </span>
-          <span
-            v-if="store.activeAlerts.length"
-            class="rounded bg-zain-alert/20 px-1.5 py-0.5 font-mono text-[10px] text-zain-alert-soft"
-          >
+          <span v-if="store.activeAlerts.length"
+            class="rounded bg-zain-alert/20 px-1.5 py-0.5 font-mono text-[10px] text-zain-alert-soft">
             {{ store.activeAlerts.length }}
           </span>
-          <span
-            class="ml-auto text-zain-accent-bright transition-transform"
-            :class="sheetOpen && 'rotate-180'"
-          >
+          <span class="ml-auto text-zain-accent-bright transition-transform" :class="sheetOpen && 'rotate-180'">
             ▴
           </span>
         </button>
-        <div
-          class="overflow-y-auto transition-[max-height] duration-500 ease-in-out"
-          :class="sheetOpen ? 'max-h-[60dvh]' : 'max-h-0'"
-        >
+        <div class="no-scrollbar overflow-y-auto transition-[max-height] duration-500 ease-in-out"
+          :class="sheetOpen ? 'max-h-[60dvh]' : 'max-h-0'">
           <PropertyPanel />
         </div>
       </div>
