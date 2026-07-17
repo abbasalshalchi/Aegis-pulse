@@ -1,0 +1,377 @@
+// Central store for the NOC prototype.
+//
+// Holds (a) mock telemetry for every monitored site — the shape mirrors what
+// /server/api/towers will eventually return from MongoDB Atlas — and (b) the
+// view state that keeps the SVG stage and the property panel synchronized:
+// active governorate/tower, zoomed section, hovered + selected component, and
+// whether an SVG transition (Blender export) is currently playing.
+import { defineStore } from 'pinia'
+
+const STATUS_RANK = { ok: 0, warning: 1, critical: 2 }
+
+export function worstStatus(items) {
+  return items.reduce(
+    (worst, item) => (STATUS_RANK[item.status] > STATUS_RANK[worst] ? item.status : worst),
+    'ok',
+  )
+}
+
+/** Compact display formatting for a sensor reading ({ value, unit }). */
+export function formatValue({ value }) {
+  if (typeof value !== 'number') return value
+  if (Number.isInteger(value)) return String(value)
+  return Math.abs(value) < 1 ? value.toFixed(2) : value.toFixed(1)
+}
+
+// ---------------------------------------------------------------------------
+// Mock telemetry seed
+// One healthy baseline per site, overridden per tower to author the demo
+// scenarios (unauthorized access in Taji, low fuel in Basra, mast tilt alarm
+// in Erbil). Section ids — 'mast' | 'bts' | 'perimeter' — are also the zoom
+// targets used by the stage and the panel.
+// ---------------------------------------------------------------------------
+
+function baselineSections() {
+  return [
+    {
+      id: 'mast',
+      label: 'Main Mast Structure',
+      components: [
+        {
+          id: 'inclinometer',
+          label: 'Inclinometer',
+          metric: 'Structural tilt',
+          value: 0.4,
+          unit: '°',
+          status: 'ok',
+          detail: { tiltX: 0.31, tiltY: -0.18, thresholdDeg: 1.5 },
+        },
+        {
+          id: 'accelerometer',
+          label: '3-Axis Accelerometer',
+          metric: 'Vibration',
+          value: 0.06,
+          unit: 'g RMS',
+          status: 'ok',
+          detail: { peakG: 0.21, dominantHz: 4.2, thresholdG: 0.35 },
+        },
+      ],
+    },
+    {
+      id: 'bts',
+      label: 'BTS Cabinet',
+      components: [
+        {
+          id: 'dht',
+          label: 'Climate (DHT)',
+          metric: 'Cabinet temperature',
+          value: 27.4,
+          unit: '°C',
+          status: 'ok',
+          detail: { humidityPct: 41, dewPointC: 13.2, thresholdC: 40 },
+        },
+        {
+          id: 'power',
+          label: 'DC Power',
+          metric: 'Battery bus',
+          value: 53.8,
+          unit: 'V',
+          status: 'ok',
+          detail: { loadA: 12.4, chargePct: 96, rectifier: 'float' },
+        },
+        {
+          id: 'fuel',
+          label: 'Diesel Fuel (Ultrasonic)',
+          metric: 'Tank level',
+          value: 78,
+          unit: '%',
+          status: 'ok',
+          detail: { litres: 936, autonomyHrs: 52, thresholdPct: 25 },
+        },
+      ],
+    },
+    {
+      id: 'perimeter',
+      label: 'Perimeter & Security',
+      components: [
+        {
+          id: 'gate',
+          label: 'Main Gate (Reed)',
+          metric: 'Contact state',
+          value: 'CLOSED',
+          unit: '',
+          status: 'ok',
+          detail: { lastChange: '2026-07-16 21:04 UTC', workOrder: null },
+        },
+        {
+          id: 'door',
+          label: 'Cabinet Door (Reed)',
+          metric: 'Contact state',
+          value: 'CLOSED',
+          unit: '',
+          status: 'ok',
+          detail: { lastChange: '2026-07-12 09:40 UTC', workOrder: 'WO-8841' },
+        },
+        {
+          id: 'pir',
+          label: 'PIR Motion',
+          metric: 'Events / 24 h',
+          value: 2,
+          unit: '',
+          status: 'ok',
+          detail: { lastEvent: '2026-07-17 02:12 UTC', armed: true },
+        },
+      ],
+    },
+  ]
+}
+
+function makeTower({ id, name, stateId, map, sla = 99.9, overrides = {} }) {
+  const sections = baselineSections()
+  for (const section of sections) {
+    for (const component of section.components) {
+      const patch = overrides[component.id]
+      if (patch) {
+        Object.assign(component, patch, { detail: { ...component.detail, ...patch.detail } })
+      }
+    }
+  }
+  return { id, name, stateId, map, sla, sections }
+}
+
+// Governorate map coordinates are in the schematic map's viewBox (0 0 100 120).
+const STATES = [
+  { id: 'erbil', name: 'Erbil', map: { x: 55, y: 16 } },
+  { id: 'anbar', name: 'Anbar', map: { x: 28, y: 46 } },
+  { id: 'baghdad', name: 'Baghdad', map: { x: 54, y: 44 } },
+  { id: 'najaf', name: 'Najaf', map: { x: 46, y: 64 } },
+  { id: 'basra', name: 'Basra', map: { x: 80, y: 84 } },
+]
+
+const TOWERS = [
+  makeTower({
+    id: 'TWR-BGW-014',
+    name: 'Karrada Rooftop',
+    stateId: 'baghdad',
+    map: { x: 58, y: 47 },
+    sla: 99.94,
+  }),
+  makeTower({
+    id: 'TWR-BGW-021',
+    name: 'Taji Greenfield',
+    stateId: 'baghdad',
+    map: { x: 50, y: 39 },
+    sla: 99.71,
+    overrides: {
+      gate: {
+        value: 'OPEN',
+        status: 'warning',
+        detail: { lastChange: '2026-07-17 05:47 UTC', workOrder: null },
+      },
+      pir: { value: 14, status: 'warning', detail: { lastEvent: '2026-07-17 05:52 UTC' } },
+    },
+  }),
+  makeTower({
+    id: 'TWR-BSR-007',
+    name: 'Umm Qasr Port',
+    stateId: 'basra',
+    map: { x: 84, y: 89 },
+    sla: 99.62,
+    overrides: {
+      fuel: { value: 22, status: 'warning', detail: { litres: 264, autonomyHrs: 14 } },
+      dht: { value: 41.6, status: 'warning', detail: { humidityPct: 18, dewPointC: 12.9 } },
+    },
+  }),
+  makeTower({
+    id: 'TWR-EBL-003',
+    name: 'Salahaddin Ridge',
+    stateId: 'erbil',
+    map: { x: 58, y: 12 },
+    sla: 98.9,
+    overrides: {
+      inclinometer: { value: 2.1, status: 'critical', detail: { tiltX: 1.9, tiltY: 0.9 } },
+      accelerometer: { value: 0.31, status: 'warning', detail: { peakG: 0.66, dominantHz: 1.1 } },
+    },
+  }),
+  makeTower({
+    id: 'TWR-ANB-011',
+    name: 'Ramadi West',
+    stateId: 'anbar',
+    map: { x: 24, y: 44 },
+    sla: 99.88,
+  }),
+  makeTower({
+    id: 'TWR-NJF-005',
+    name: 'Kufa Road',
+    stateId: 'najaf',
+    map: { x: 48, y: 67 },
+    sla: 99.9,
+  }),
+]
+
+export const useTowerStore = defineStore('tower', {
+  state: () => ({
+    states: STATES,
+    towers: TOWERS,
+
+    activeStateId: null,
+    activeTowerId: null,
+
+    // null = full-tower view, otherwise 'mast' | 'bts' | 'perimeter'
+    zoomedSection: null,
+
+    // True while an SVG transition (Blender export) plays. Overlays stay
+    // hidden until the stage reports the animation has resolved.
+    transition: { playing: false, name: null },
+
+    // Two-way hover/selection sync between the SVG stage and the panel
+    hoveredComponentId: null,
+    selectedComponentId: null,
+  }),
+
+  getters: {
+    activeState: (state) => state.states.find((s) => s.id === state.activeStateId) ?? null,
+    activeTower: (state) => state.towers.find((t) => t.id === state.activeTowerId) ?? null,
+    towersInActiveState: (state) => state.towers.filter((t) => t.stateId === state.activeStateId),
+
+    sections() {
+      return this.activeTower?.sections ?? []
+    },
+
+    // Sections whose sensors are currently on display (all of them in the
+    // full-tower view, only the zoomed one otherwise).
+    visibleSections() {
+      return this.zoomedSection
+        ? this.sections.filter((s) => s.id === this.zoomedSection)
+        : this.sections
+    },
+
+    // One aggregate card per section for the full-tower spatial overlays:
+    // worst status wins and provides the headline reading.
+    sectionSummaries() {
+      return this.sections.map((section) => {
+        const status = worstStatus(section.components)
+        const headline = section.components.find((c) => c.status === status) ?? section.components[0]
+        return {
+          id: section.id,
+          label: section.label,
+          status,
+          value: headline.value,
+          unit: headline.unit,
+          metric: `${headline.label} · ${headline.metric}`,
+        }
+      })
+    },
+
+    sectionStatus() {
+      return (sectionId) => {
+        const section = this.sections.find((s) => s.id === sectionId)
+        return section ? worstStatus(section.components) : 'ok'
+      }
+    },
+
+    towerStatus: () => (tower) => worstStatus(tower.sections.flatMap((s) => s.components)),
+
+    stateStatus() {
+      return (stateId) =>
+        worstStatus(
+          this.towers
+            .filter((t) => t.stateId === stateId)
+            .map((t) => ({ status: this.towerStatus(t) })),
+        )
+    },
+
+    activeAlerts() {
+      return this.sections.flatMap((section) =>
+        section.components
+          .filter((c) => c.status !== 'ok')
+          .map((c) => ({ ...c, sectionId: section.id, sectionLabel: section.label })),
+      )
+    },
+
+    networkAlertCount: (state) =>
+      state.towers
+        .flatMap((t) => t.sections)
+        .flatMap((s) => s.components)
+        .filter((c) => c.status !== 'ok').length,
+  },
+
+  actions: {
+    selectState(stateId) {
+      this.activeStateId = stateId
+    },
+
+    clearState() {
+      this.activeStateId = null
+    },
+
+    /** Entering a tower (map click or deep link). Returns false for unknown ids. */
+    selectTower(towerId) {
+      const tower = this.towers.find((t) => t.id === towerId)
+      if (!tower) return false
+      this.activeTowerId = tower.id
+      this.activeStateId = tower.stateId
+      this.zoomedSection = null
+      this.selectedComponentId = null
+      this.hoveredComponentId = null
+      this.beginTransition('map-to-tower')
+      return true
+    },
+
+    leaveTower() {
+      this.activeTowerId = null
+      this.zoomedSection = null
+      this.selectedComponentId = null
+      this.hoveredComponentId = null
+      this.transition = { playing: false, name: null }
+    },
+
+    zoomIntoSection(sectionId) {
+      if (this.zoomedSection === sectionId || this.transition.playing) return
+      this.beginTransition(`zoom-${sectionId}`)
+      this.zoomedSection = sectionId
+    },
+
+    zoomOut() {
+      if (!this.zoomedSection || this.transition.playing) return
+      this.beginTransition('zoom-out')
+      this.zoomedSection = null
+      this.selectedComponentId = null
+    },
+
+    /** Panel row click: zoom the stage onto that section and select the sensor. */
+    selectComponent(sectionId, componentId) {
+      if (this.zoomedSection !== sectionId) this.zoomIntoSection(sectionId)
+      this.selectedComponentId = this.selectedComponentId === componentId ? null : componentId
+    },
+
+    setHoveredComponent(componentId) {
+      this.hoveredComponentId = componentId
+    },
+
+    beginTransition(name) {
+      this.transition = { playing: true, name }
+    },
+
+    /**
+     * Called by the stage when the SVG animation resolves — today a timer over
+     * the placeholder CSS transform, later the Blender export's `ended` event.
+     */
+    finishTransition() {
+      this.transition = { playing: false, name: null }
+    },
+
+    /** Small random drift on numeric readings so the demo feels live. */
+    jitterTelemetry() {
+      for (const tower of this.towers) {
+        for (const section of tower.sections) {
+          for (const component of section.components) {
+            if (typeof component.value !== 'number' || !component.unit) continue
+            const drift = component.value * 0.01 * (Math.random() - 0.5)
+            component.value = Math.round((component.value + drift) * 100) / 100
+          }
+        }
+      }
+    },
+  },
+})

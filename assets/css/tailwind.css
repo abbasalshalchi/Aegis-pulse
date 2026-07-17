@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply bg-zain-dark font-sans text-zain-light;
+  }
+}
+
+@layer components {
+  /* Floating spatial overlay chip, anchored to a point on the tower artwork */
+  .overlay-card {
+    @apply w-36 rounded-md border border-zain-accent/40 bg-zain-dark/85 px-3 py-2 shadow-overlay backdrop-blur-sm md:w-44;
+  }
+
+  .status-dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full;
+  }
+  .status-dot--ok {
+    @apply bg-status-ok;
+  }
+  .status-dot--warning {
+    @apply bg-status-warning;
+  }
+  .status-dot--critical {
+    @apply animate-pulse-dot bg-status-critical;
+  }
+}
+
+/* Route transition used by <NuxtPage> (see app.pageTransition in nuxt.config.ts) */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.25s ease;
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
