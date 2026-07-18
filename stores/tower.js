@@ -179,7 +179,9 @@ const TOWERS = [
     id: 'TWR-BSR-007',
     name: 'Umm Qasr Port',
     stateId: 'basra',
-    plot: { u: 0.5, v: 0.72 },
+    // Basra curves like a banana; the bbox centre/south falls outside its
+    // border, so this sits in the landmass's thick interior (visual centre).
+    plot: { u: 0.49, v: 0.36 },
     sla: 99.62,
     overrides: {
       fuel: { value: 22, status: 'warning', detail: { litres: 264, autonomyHrs: 14 } },

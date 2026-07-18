@@ -60,28 +60,33 @@ const activeGeo = computed(() =>
   store.activeState ? (geo.value[store.activeState.svgId] ?? null) : null,
 )
 
-// CSS transform that fakes the camera zoom onto the active governorate
+// CSS transform that fakes the camera zoom onto the active governorate.
+// Scale about the viewBox origin, then translate the region's centroid to the
+// frame centre (500, 500) so edge governorates end up centred, not pinned to
+// the rim. With overflow visible, the rest of the country spills past the
+// square frame instead of being clipped.
+const CENTRE = 500
 const zoomStyle = computed(() => {
   const g = activeGeo.value
-  if (!g) return { transform: 'scale(1)', transformOrigin: '500px 500px' }
-  return { transform: `scale(${g.scale})`, transformOrigin: `${g.cx}px ${g.cy}px` }
+  if (!g) return { transform: 'translate(0px, 0px) scale(1)', transformOrigin: '0 0' }
+  const tx = CENTRE - g.scale * g.cx
+  const ty = CENTRE - g.scale * g.cy
+  return { transform: `translate(${tx}px, ${ty}px) scale(${g.scale})`, transformOrigin: '0 0' }
 })
 
-// Project a base-viewBox point through the active zoom, so markers rendered
-// outside the scaled group land on the right spot while keeping constant size.
-function projected(point) {
-  const g = activeGeo.value
-  if (!g) return point
-  return { x: g.cx + g.scale * (point.x - g.cx), y: g.cy + g.scale * (point.y - g.cy) }
+// A tower's position in base viewBox coords: its { u, v } fraction of the
+// governorate bbox. Markers live inside the zoomed group, so the group's
+// animated transform carries them with the camera — no manual projection, and
+// they travel/grow in sync with the zoom instead of snapping to the end state.
+function towerBase(tower) {
+  const g = geo.value[store.activeState?.svgId]
+  if (!g) return { x: CENTRE, y: CENTRE }
+  return { x: g.x + tower.plot.u * g.w, y: g.y + tower.plot.v * g.h }
 }
 
-// A tower's screen position: its { u, v } fraction of the governorate bbox,
-// then projected through the zoom.
-function towerPoint(tower) {
-  const g = geo.value[store.activeState?.svgId]
-  if (!g) return { x: 500, y: 500 }
-  return projected({ x: g.x + tower.plot.u * g.w, y: g.y + tower.plot.v * g.h })
-}
+// Applied to each marker's artwork to cancel the group's zoom, so pins settle
+// at a constant on-screen size regardless of how far a governorate is zoomed.
+const counterScale = computed(() => (activeGeo.value ? 1 / activeGeo.value.scale : 1))
 
 // --- Per-region styling -----------------------------------------------------
 function isActive(gov) {
@@ -112,6 +117,11 @@ function regionOpacity(gov) {
 function onGovClick(gov) {
   const state = networkBySvg.value[gov.id]
   if (state) store.selectState(state.id)
+}
+
+// Clicking the empty canvas outside Iraq backs out of a zoomed governorate.
+function onBackdropClick() {
+  if (store.activeState) store.clearState()
 }
 
 // --- List card (mirrors the markers) ---------------------------------------
@@ -146,7 +156,7 @@ function openItem(item) {
       <div class="relative aspect-square w-[min(100cqw,100cqh)]">
         <svg
           :viewBox="`0 0 ${IRAQ_VIEWBOX.width} ${IRAQ_VIEWBOX.height}`"
-          class="h-full w-full select-none"
+          class="h-full w-full select-none overflow-visible"
           role="img"
           aria-label="Network map of Iraq governorates"
         >
@@ -155,7 +165,18 @@ function openItem(item) {
               <path d="M40 0H0V40" fill="none" stroke="#3F826D" stroke-opacity="0.08" stroke-width="1" />
             </pattern>
           </defs>
-          <rect width="1000" height="1000" fill="url(#mapgrid)" />
+          <!-- Backdrop: clicking outside Iraq while zoomed returns to the country view.
+               Oversized so it still catches clicks in the area the map spills into. -->
+          <rect
+            x="-5000"
+            y="-5000"
+            width="11000"
+            height="11000"
+            fill="transparent"
+            pointer-events="all"
+            @click="onBackdropClick"
+          />
+          <rect width="1000" height="1000" fill="url(#mapgrid)" pointer-events="none" />
 
           <!-- Landmass: real governorate paths, zooms into the active region -->
           <g
@@ -182,86 +203,97 @@ function openItem(item) {
             >
               <title>{{ gov.name }}</title>
             </path>
-          </g>
 
-          <!-- Governorate markers (country view) -->
-          <g v-if="geoReady && !store.activeState">
-            <g
-              v-for="state in store.states"
-              :key="state.id"
-              class="cursor-pointer"
-              @click="store.selectState(state.id)"
-              @mouseenter="hoveredId = state.id"
-              @mouseleave="hoveredId = null"
-            >
-              <circle
-                :cx="geo[state.svgId].cx"
-                :cy="geo[state.svgId].cy"
-                :r="hoveredId === state.id ? 13 : 9"
-                fill="none"
-                class="stroke-zain-sand transition-all"
-                stroke-width="2"
-              />
-              <circle :cx="geo[state.svgId].cx" :cy="geo[state.svgId].cy" r="3.5" class="fill-zain-sand" />
-              <circle
-                v-if="store.stateStatus(state.id) !== 'ok'"
-                :cx="geo[state.svgId].cx + 11"
-                :cy="geo[state.svgId].cy - 11"
-                r="4.5"
-                class="animate-pulse-dot"
-                :fill="STROKE[store.stateStatus(state.id)]"
-              />
-              <text
-                :x="geo[state.svgId].cx"
-                :y="geo[state.svgId].cy + 26"
-                text-anchor="middle"
-                class="fill-zain-light uppercase"
-                style="font-size: 17px; letter-spacing: 0.12em; paint-order: stroke"
-                stroke="#102B30"
-                stroke-width="3"
+            <!-- Tower markers: inside the zoomed group, so the camera transform
+                 carries them along instead of snapping them to the final spot.
+                 Anchored at base coords; artwork is counter-scaled to stay a
+                 constant size at rest. -->
+            <g v-if="geoReady && store.activeState">
+              <g
+                v-for="tower in store.towersInActiveState"
+                :key="tower.id"
+                :transform="`translate(${towerBase(tower).x} ${towerBase(tower).y})`"
               >
-                {{ state.name }}
-              </text>
+                <g
+                  :transform="`scale(${counterScale})`"
+                  class="cursor-pointer"
+                  @click="navigateTo(`/tower/${tower.id}`)"
+                  @mouseenter="hoveredId = tower.id"
+                  @mouseleave="hoveredId = null"
+                >
+                  <circle r="30" fill="transparent" pointer-events="all" />
+                  <circle
+                    v-if="store.towerStatus(tower) !== 'ok'"
+                    r="18"
+                    fill="none"
+                    :stroke="STROKE[store.towerStatus(tower)]"
+                    stroke-width="1.5"
+                    class="animate-pulse-dot"
+                  />
+                  <path
+                    d="M0 -16 L-11 13 H11 Z"
+                    fill="#102B30"
+                    :stroke="STROKE[store.towerStatus(tower)]"
+                    :stroke-width="hoveredId === tower.id ? 3.5 : 2"
+                    class="transition-all"
+                  />
+                  <circle cy="-2" r="3" :fill="STROKE[store.towerStatus(tower)]" />
+                  <text
+                    y="30"
+                    text-anchor="middle"
+                    class="fill-zain-light"
+                    style="font-size: 15px; letter-spacing: 0.05em; paint-order: stroke"
+                    stroke="#102B30"
+                    stroke-width="3"
+                  >
+                    {{ tower.id }}
+                  </text>
+                </g>
+              </g>
             </g>
-          </g>
 
-          <!-- Tower markers (within the zoomed governorate) -->
-          <g v-else-if="geoReady && store.activeState">
-            <g
-              v-for="tower in store.towersInActiveState"
-              :key="tower.id"
-              class="cursor-pointer"
-              :transform="`translate(${towerPoint(tower).x} ${towerPoint(tower).y})`"
-              @click="navigateTo(`/tower/${tower.id}`)"
-              @mouseenter="hoveredId = tower.id"
-              @mouseleave="hoveredId = null"
-            >
-              <circle
-                v-if="store.towerStatus(tower) !== 'ok'"
-                r="18"
-                fill="none"
-                :stroke="STROKE[store.towerStatus(tower)]"
-                stroke-width="1.5"
-                class="animate-pulse-dot"
-              />
-              <path
-                d="M0 -16 L-11 13 H11 Z"
-                fill="#102B30"
-                :stroke="STROKE[store.towerStatus(tower)]"
-                :stroke-width="hoveredId === tower.id ? 3.5 : 2"
-                class="transition-all"
-              />
-              <circle cy="-2" r="3" :fill="STROKE[store.towerStatus(tower)]" />
-              <text
-                y="30"
-                text-anchor="middle"
-                class="fill-zain-light"
-                style="font-size: 15px; letter-spacing: 0.05em; paint-order: stroke"
-                stroke="#102B30"
-                stroke-width="3"
+            <!-- Governorate markers (country view): also inside the group so they
+                 track the map during the zoom-out instead of snapping to their
+                 final spots. They scale with the terrain as the camera pulls
+                 back; the fade masks the oversized first frame. -->
+            <g v-if="geoReady && !store.activeState" class="animate-fade-up">
+              <g
+                v-for="state in store.states"
+                :key="state.id"
+                class="cursor-pointer"
+                @click="store.selectState(state.id)"
+                @mouseenter="hoveredId = state.id"
+                @mouseleave="hoveredId = null"
               >
-                {{ tower.id }}
-              </text>
+                <circle
+                  :cx="geo[state.svgId].cx"
+                  :cy="geo[state.svgId].cy"
+                  :r="hoveredId === state.id ? 13 : 9"
+                  fill="none"
+                  class="stroke-zain-sand transition-all"
+                  stroke-width="2"
+                />
+                <circle :cx="geo[state.svgId].cx" :cy="geo[state.svgId].cy" r="3.5" class="fill-zain-sand" />
+                <circle
+                  v-if="store.stateStatus(state.id) !== 'ok'"
+                  :cx="geo[state.svgId].cx + 11"
+                  :cy="geo[state.svgId].cy - 11"
+                  r="4.5"
+                  class="animate-pulse-dot"
+                  :fill="STROKE[store.stateStatus(state.id)]"
+                />
+                <text
+                  :x="geo[state.svgId].cx"
+                  :y="geo[state.svgId].cy + 26"
+                  text-anchor="middle"
+                  class="fill-zain-light uppercase"
+                  style="font-size: 17px; letter-spacing: 0.12em; paint-order: stroke"
+                  stroke="#102B30"
+                  stroke-width="3"
+                >
+                  {{ state.name }}
+                </text>
+              </g>
             </g>
           </g>
         </svg>
