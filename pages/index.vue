@@ -82,6 +82,7 @@ function openItem(item) {
           <g v-if="!store.activeState">
             <g v-for="state in store.states" :key="state.id" class="cursor-pointer" @click="store.selectState(state.id)"
               @mouseenter="hoveredId = state.id" @mouseleave="hoveredId = null">
+              <circle :cx="state.map.x" :cy="state.map.y" r="7" fill="transparent" pointer-events="all" />
               <circle :cx="state.map.x" :cy="state.map.y" :r="hoveredId === state.id ? 4.2 : 3" fill="none"
                 class="stroke-zain-accent-bright transition-all" stroke-width="0.5" />
               <circle :cx="state.map.x" :cy="state.map.y" r="1.2" class="fill-zain-sand" />
@@ -100,6 +101,7 @@ function openItem(item) {
               :transform="`translate(${projected(tower.map).x} ${projected(tower.map).y})`"
               @click="navigateTo(`/tower/${tower.id}`)" @mouseenter="hoveredId = tower.id"
               @mouseleave="hoveredId = null">
+              <circle r="8" fill="transparent" pointer-events="all" />
               <circle v-if="store.towerStatus(tower) !== 'ok'" r="5" fill="none"
                 :stroke="STROKE[store.towerStatus(tower)]" stroke-width="0.4" class="animate-pulse-dot" />
               <path d="M0 -4.4 L-3 3.6 H3 Z" fill="none" :stroke="STROKE[store.towerStatus(tower)]"
