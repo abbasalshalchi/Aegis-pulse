@@ -31,6 +31,13 @@ export default defineConfig([
   js.configs.recommended,
   ...pluginVue.configs['flat/essential'],
 
+  {
+    // Nuxt file-based routing: pages/layouts are single-word by convention.
+    name: 'app/nuxt-single-word-pages',
+    files: ['pages/**/*.vue', 'layouts/**/*.vue', 'app.vue', 'error.vue'],
+    rules: { 'vue/multi-word-component-names': 'off' },
+  },
+
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
   skipFormatting,

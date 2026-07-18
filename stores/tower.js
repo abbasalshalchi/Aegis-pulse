@@ -126,7 +126,7 @@ function baselineSections() {
   ]
 }
 
-function makeTower({ id, name, stateId, map, sla = 99.9, overrides = {} }) {
+function makeTower({ id, name, stateId, plot, sla = 99.9, overrides = {} }) {
   const sections = baselineSections()
   for (const section of sections) {
     for (const component of section.components) {
@@ -136,31 +136,35 @@ function makeTower({ id, name, stateId, map, sla = 99.9, overrides = {} }) {
       }
     }
   }
-  return { id, name, stateId, map, sla, sections }
+  return { id, name, stateId, plot, sla, sections }
 }
 
-// Governorate map coordinates are in the schematic map's viewBox (0 0 100 120).
+// Network governorates. `svgId` links to the real Iraq map path in
+// assets/iraq-geo.js; the Map View derives each region's centroid and zoom
+// from that path's geometry at runtime, so no pixel coordinates live here.
 const STATES = [
-  { id: 'erbil', name: 'Erbil', map: { x: 55, y: 16 } },
-  { id: 'anbar', name: 'Anbar', map: { x: 28, y: 46 } },
-  { id: 'baghdad', name: 'Baghdad', map: { x: 54, y: 44 } },
-  { id: 'najaf', name: 'Najaf', map: { x: 46, y: 64 } },
-  { id: 'basra', name: 'Basra', map: { x: 80, y: 84 } },
+  { id: 'erbil', name: 'Erbil', svgId: 'IQAR' },
+  { id: 'anbar', name: 'Anbar', svgId: 'IQAN' },
+  { id: 'baghdad', name: 'Baghdad', svgId: 'IQBG' },
+  { id: 'najaf', name: 'Najaf', svgId: 'IQNA' },
+  { id: 'basra', name: 'Basra', svgId: 'IQBA' },
 ]
 
+// `plot` is a { u, v } fraction of the governorate's bounding box (0,0 = top-
+// left, 1,1 = bottom-right); the Map View projects it onto the real geometry.
 const TOWERS = [
   makeTower({
     id: 'TWR-BGW-014',
     name: 'Karrada Rooftop',
     stateId: 'baghdad',
-    map: { x: 58, y: 47 },
+    plot: { u: 0.52, v: 0.58 },
     sla: 99.94,
   }),
   makeTower({
     id: 'TWR-BGW-021',
     name: 'Taji Greenfield',
     stateId: 'baghdad',
-    map: { x: 50, y: 39 },
+    plot: { u: 0.4, v: 0.3 },
     sla: 99.71,
     overrides: {
       gate: {
@@ -175,7 +179,7 @@ const TOWERS = [
     id: 'TWR-BSR-007',
     name: 'Umm Qasr Port',
     stateId: 'basra',
-    map: { x: 84, y: 89 },
+    plot: { u: 0.5, v: 0.72 },
     sla: 99.62,
     overrides: {
       fuel: { value: 22, status: 'warning', detail: { litres: 264, autonomyHrs: 14 } },
@@ -186,7 +190,7 @@ const TOWERS = [
     id: 'TWR-EBL-003',
     name: 'Salahaddin Ridge',
     stateId: 'erbil',
-    map: { x: 58, y: 12 },
+    plot: { u: 0.45, v: 0.5 },
     sla: 98.9,
     overrides: {
       inclinometer: { value: 2.1, status: 'critical', detail: { tiltX: 1.9, tiltY: 0.9 } },
@@ -197,14 +201,14 @@ const TOWERS = [
     id: 'TWR-ANB-011',
     name: 'Ramadi West',
     stateId: 'anbar',
-    map: { x: 24, y: 44 },
+    plot: { u: 0.72, v: 0.62 },
     sla: 99.88,
   }),
   makeTower({
     id: 'TWR-NJF-005',
     name: 'Kufa Road',
     stateId: 'najaf',
-    map: { x: 48, y: 67 },
+    plot: { u: 0.62, v: 0.32 },
     sla: 99.9,
   }),
 ]
