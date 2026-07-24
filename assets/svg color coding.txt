@@ -1,0 +1,9 @@
+the color coding is as follows:
+ff0000 for the tower mast structural beams.
+8000ff for the fence upper and lower strips, the fence wires are not colored but just lineart.
+ffff00 for the bts cabinet except the door.
+ff00ff for the bts cabinet door.
+00ffff for the power generator. 
+ff8000 for the concrete base under the tower, bts cabinet and pwer generator.
+00ff00 for the dish antenna.
+0000ff for the four sector antennas at the top.

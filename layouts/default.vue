@@ -6,7 +6,7 @@ import { useTowerStore } from '~/stores/tower'
 const store = useTowerStore()
 const route = useRoute()
 
-const SECTION_LABELS = { mast: 'Main Mast', bts: 'BTS Cabinet', perimeter: 'Perimeter' }
+const SECTION_LABELS = { mast: 'Main Mast', bts: 'BTS Cabinet', generator: 'Power Generator' }
 
 // Iraq ▸ governorate ▸ tower ▸ section — mirrors the drill-down state and lets
 // the user climb back up from anywhere.

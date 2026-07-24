@@ -1,6 +1,15 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { formatValue, useTowerStore } from '~/stores/tower'
+import {
+  CLIPS_AVAILABLE,
+  PRELOAD_CLIPS,
+  STAGE_ASPECT_H,
+  STAGE_ASPECT_W,
+  STILLS_AVAILABLE,
+  clipUrl,
+  stillFor,
+} from '~/assets/tower-scene.js'
 
 // ---------------------------------------------------------------------------
 // Tower stage — placeholder implementation.
@@ -25,17 +34,28 @@ const TRANSITION_MS = 750
 // How the artwork group is scaled to fake the camera zoom per section
 const SECTION_ZOOM = {
   mast: { origin: '250px 150px', scale: 2.1 },
-  bts: { origin: '375px 585px', scale: 2.2 },
-  perimeter: { origin: '250px 595px', scale: 1.7 },
+  bts: { origin: '360px 580px', scale: 2.2 },
+  generator: { origin: '424px 600px', scale: 2.2 },
 }
+
+// The overlay coordinate space follows whichever artwork is on screen, so the
+// leader-line/dot sizes scale with it.
+const VIEW_W = STILLS_AVAILABLE ? 1920 : 500
+const VIEW_H = STILLS_AVAILABLE ? 1080 : 700
+const DOT_R = STILLS_AVAILABLE ? 14 : 4
+const DOT_CORE = STILLS_AVAILABLE ? 6 : 1.8
+const LINE_W = STILLS_AVAILABLE ? 4 : 1.2
+const LINE_DASH = STILLS_AVAILABLE ? '18 14' : '5 4'
 
 // dot  = leader-line end on the structure (screen space, after zoom)
 // card = connection point of the floating card; side = which way it extends
-const OVERLAY_GEOMETRY = {
+
+// Placeholder art (viewBox 500x700)
+const PLACEHOLDER_GEOMETRY = {
   overview: {
     mast: { dot: { x: 250, y: 158 }, card: { x: 322, y: 95 }, side: 'right' },
     bts: { dot: { x: 362, y: 566 }, card: { x: 408, y: 462 }, side: 'right' },
-    perimeter: { dot: { x: 116, y: 597 }, card: { x: 60, y: 468 }, side: 'right' },
+    generator: { dot: { x: 424, y: 600 }, card: { x: 300, y: 668 }, side: 'left' },
   },
   mast: {
     inclinometer: { dot: { x: 250, y: 339 }, card: { x: 322, y: 225 }, side: 'right' },
@@ -44,14 +64,58 @@ const OVERLAY_GEOMETRY = {
   bts: {
     dht: { dot: { x: 298, y: 523 }, card: { x: 208, y: 430 }, side: 'left' },
     power: { dot: { x: 298, y: 587 }, card: { x: 204, y: 565 }, side: 'left' },
-    fuel: { dot: { x: 483, y: 620 }, card: { x: 350, y: 655 }, side: 'left' },
+    door: { dot: { x: 362, y: 580 }, card: { x: 452, y: 540 }, side: 'right' },
   },
-  perimeter: {
-    gate: { dot: { x: 30, y: 585 }, card: { x: 64, y: 470 }, side: 'right' },
-    pir: { dot: { x: 131, y: 508 }, card: { x: 162, y: 425 }, side: 'right' },
-    door: { dot: { x: 452, y: 522 }, card: { x: 345, y: 485 }, side: 'left' },
+  generator: {
+    fuel: { dot: { x: 424, y: 604 }, card: { x: 350, y: 660 }, side: 'left' },
+    gate: { dot: { x: 120, y: 590 }, card: { x: 64, y: 470 }, side: 'right' },
+    pir: { dot: { x: 180, y: 545 }, card: { x: 214, y: 430 }, side: 'right' },
   },
 }
+
+// Blender stills (viewBox 1920x1080). Derived from each still's
+// data-component groups — nudge these to taste.
+const STILL_GEOMETRY = {
+  overview: {
+    mast: { dot: { x: 957, y: 216 }, card: { x: 657, y: 96 }, side: 'left' },
+    bts: { dot: { x: 780, y: 749 }, card: { x: 480, y: 629 }, side: 'left' },
+    generator: { dot: { x: 1150, y: 686 }, card: { x: 1450, y: 566 }, side: 'right' },
+  },
+  mast: {
+    inclinometer: { dot: { x: 985, y: 428 }, card: { x: 1285, y: 308 }, side: 'right' },
+    accelerometer: { dot: { x: 985, y: 819 }, card: { x: 1285, y: 699 }, side: 'right' },
+  },
+  bts: {
+    dht: { dot: { x: 860, y: 297 }, card: { x: 560, y: 177 }, side: 'left' },
+    power: { dot: { x: 860, y: 734 }, card: { x: 560, y: 614 }, side: 'left' },
+    door: { dot: { x: 1028, y: 615 }, card: { x: 1328, y: 495 }, side: 'right' },
+  },
+  generator: {
+    fuel: { dot: { x: 987, y: 489 }, card: { x: 1287, y: 369 }, side: 'right' },
+    // The generator view shows no distinct gate/PIR geometry — these two are
+    // placed by eye on the fence. Colour them in the source SVG for exact anchors.
+    gate: { dot: { x: 1620, y: 700 }, card: { x: 1400, y: 840 }, side: 'left' },
+    pir: { dot: { x: 1660, y: 200 }, card: { x: 1420, y: 120 }, side: 'left' },
+  },
+}
+
+const OVERLAY_GEOMETRY = STILLS_AVAILABLE ? STILL_GEOMETRY : PLACEHOLDER_GEOMETRY
+
+// Click targets shown in the full view, one or more boxes per section. For the
+// stills these are the measured data-component bounds (mast box also covers the
+// dish + sector antennas); drawn last-wins, so bts/generator take any overlap.
+const SECTION_HOTSPOTS = STILLS_AVAILABLE
+  ? [
+      { section: 'mast', x: 837, y: 23, w: 238, h: 869 },
+      { section: 'bts', x: 685, y: 630, w: 191, h: 294 },
+      { section: 'generator', x: 1024, y: 576, w: 252, h: 244 },
+    ]
+  : [
+      { section: 'mast', x: 200, y: 70, w: 100, h: 480 },
+      { section: 'bts', x: 315, y: 535, w: 88, h: 90 },
+      { section: 'generator', x: 398, y: 572, w: 56, h: 53 },
+      { section: 'generator', x: 50, y: 530, w: 220, h: 95 },
+    ]
 
 const STROKE = { ok: '#5FA98D', warning: '#F2D0A4', critical: '#C03221' }
 
@@ -97,8 +161,8 @@ const overlays = computed(() => {
 
 function cardStyle(overlay) {
   return {
-    left: `${(overlay.card.x / 500) * 100}%`,
-    top: `${(overlay.card.y / 700) * 100}%`,
+    left: `${(overlay.card.x / VIEW_W) * 100}%`,
+    top: `${(overlay.card.y / VIEW_H) * 100}%`,
     transform:
       overlay.side === 'left' ? 'translate(calc(-100% - 8px), -50%)' : 'translate(8px, -50%)',
   }
@@ -122,13 +186,56 @@ const scopeLabel = computed(() =>
   store.zoomedSection ? store.visibleSections[0]?.label : 'Full site view',
 )
 
-// Placeholder for the SVG animation's `ended` event: report the transition as
-// resolved once the CSS transform settles. Client-only.
+// --- Cinematic transitions -------------------------------------------------
+// Resting states are pre-rendered vector line-art + a raster fill; the camera
+// moves between them are pre-rendered clips (Blender). The clip plays over the
+// stage, then we hard-cut to the destination still. While CLIPS_AVAILABLE is
+// false the stage keeps the built-in placeholder art + CSS-zoom fallback so the
+// app works before the exports land (see assets/tower-scene.js).
+const stageAspect = STAGE_ASPECT_W / STAGE_ASPECT_H
+const videoEl = ref(null)
+const clipPlaying = ref(false)
+const currentStill = ref(store.zoomedSection ?? 'full')
+let safetyTimer = null
+
+function preloadClips() {
+  for (const url of PRELOAD_CLIPS) if (url) fetch(url).catch(() => {})
+}
+
+function playTransition() {
+  const clip = CLIPS_AVAILABLE ? clipUrl(store.transition.from, store.transition.to) : null
+  const video = videoEl.value
+  if (clip && video) {
+    clipPlaying.value = true
+    video.src = clip
+    video.addEventListener('ended', finishTransition, { once: true })
+    video.addEventListener('error', finishTransition, { once: true })
+    video.play().catch(finishTransition)
+    safetyTimer = setTimeout(finishTransition, 6000) // clip stalled / never ends
+  } else {
+    // No clip: let the CSS transform settle, then resolve (placeholder path).
+    safetyTimer = setTimeout(finishTransition, TRANSITION_MS)
+  }
+}
+
+function finishTransition() {
+  clearTimeout(safetyTimer)
+  const video = videoEl.value
+  if (video) {
+    video.removeEventListener('ended', finishTransition)
+    video.removeEventListener('error', finishTransition)
+  }
+  clipPlaying.value = false
+  currentStill.value = store.zoomedSection ?? 'full'
+  if (store.transition.playing) store.finishTransition()
+}
+
 onMounted(() => {
+  if (CLIPS_AVAILABLE) preloadClips()
   watch(
     () => store.transition.playing,
     (playing) => {
-      if (playing) setTimeout(() => store.finishTransition(), TRANSITION_MS)
+      if (playing) playTransition()
     },
     { immediate: true },
   )
@@ -139,8 +246,23 @@ onMounted(() => {
   <div
     class="relative flex h-full w-full items-center justify-center p-3 pb-20 lg:p-6 [container-type:size]"
   >
-    <div class="relative aspect-[5/7] w-[min(100cqw,71.4cqh)]">
+    <div
+      class="relative"
+      :style="{
+        aspectRatio: `${STAGE_ASPECT_W} / ${STAGE_ASPECT_H}`,
+        width: `min(100cqw, calc(${stageAspect} * 100cqh))`,
+      }"
+    >
+      <!-- Static resting state: one self-contained themed vector SVG -->
+      <img
+        v-if="STILLS_AVAILABLE"
+        :src="stillFor(currentStill)"
+        alt=""
+        class="pointer-events-none absolute inset-0 h-full w-full object-contain"
+      />
+
       <svg
+        v-if="!STILLS_AVAILABLE"
         viewBox="0 0 500 700"
         class="h-full w-full select-none"
         role="img"
@@ -220,56 +342,105 @@ onMounted(() => {
             <line x1="424" y1="588" x2="424" y2="582" class="stroke-zain-sand/50" stroke-width="1.5" />
           </g>
 
-          <!-- clickable section hotspots (overview only) -->
-          <g v-if="!store.zoomedSection">
-            <rect
-              x="200" y="70" width="100" height="480" rx="6"
-              class="cursor-pointer fill-zain-accent/0 transition-colors hover:fill-zain-accent/10"
-              :class="highlightedSection === 'mast' && 'fill-zain-accent/10'"
-              @click="store.zoomIntoSection('mast')"
-            />
-            <rect
-              x="315" y="535" width="135" height="90" rx="6"
-              class="cursor-pointer fill-zain-accent/0 transition-colors hover:fill-zain-accent/10"
-              :class="highlightedSection === 'bts' && 'fill-zain-accent/10'"
-              @click="store.zoomIntoSection('bts')"
-            />
-            <rect
-              x="50" y="530" width="220" height="95" rx="6"
-              class="cursor-pointer fill-zain-accent/0 transition-colors hover:fill-zain-accent/10"
-              :class="highlightedSection === 'perimeter' && 'fill-zain-accent/10'"
-              @click="store.zoomIntoSection('perimeter')"
-            />
-          </g>
-        </g>
-
-        <!-- Leader lines + anchor dots (screen space, drawn above the zoom) -->
-        <g v-if="!store.transition.playing" :key="viewKey">
-          <g v-for="overlay in overlays" :key="overlay.id">
-            <line
-              :x1="overlay.dot.x"
-              :y1="overlay.dot.y"
-              :x2="overlay.card.x"
-              :y2="overlay.card.y"
-              :stroke="STROKE[overlay.status]"
-              stroke-opacity="0.7"
-              stroke-width="1.2"
-              stroke-dasharray="5 4"
-            />
-            <circle
-              :cx="overlay.dot.x"
-              :cy="overlay.dot.y"
-              r="4"
-              fill="none"
-              :stroke="STROKE[overlay.status]"
-              class="animate-pulse-dot"
-            />
-            <circle :cx="overlay.dot.x" :cy="overlay.dot.y" r="1.8" :fill="STROKE[overlay.status]" />
-          </g>
         </g>
       </svg>
 
-      <!-- Floating overlay cards (HTML, registered to the SVG coordinates) -->
+      <!-- Section click targets (full view only), in the active artwork space -->
+      <svg
+        v-if="!store.zoomedSection && !store.transition.playing"
+        :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
+        class="pointer-events-none absolute inset-0 h-full w-full"
+      >
+        <rect
+          v-for="(spot, i) in SECTION_HOTSPOTS"
+          :key="`${spot.section}-${i}`"
+          :x="spot.x"
+          :y="spot.y"
+          :width="spot.w"
+          :height="spot.h"
+          :rx="STILLS_AVAILABLE ? 14 : 6"
+          class="pointer-events-auto cursor-pointer fill-zain-accent/0 transition-colors hover:fill-zain-accent/10"
+          :class="highlightedSection === spot.section && 'fill-zain-accent/10'"
+          @click="store.zoomIntoSection(spot.section)"
+          @mouseenter="store.setHoveredComponent(spot.section)"
+          @mouseleave="store.setHoveredComponent(null)"
+        />
+      </svg>
+
+      <!-- Leader lines + anchor dots, in whichever artwork's coordinate space -->
+      <svg
+        v-if="!store.transition.playing"
+        :key="`leads-${viewKey}`"
+        :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
+        class="pointer-events-none absolute inset-0 h-full w-full"
+      >
+        <!-- Each mark gets a dark halo first so it stays legible on any fill
+             (the door fill and the 'ok' status colour are the same green). -->
+        <g v-for="overlay in overlays" :key="overlay.id">
+          <line
+            :x1="overlay.dot.x"
+            :y1="overlay.dot.y"
+            :x2="overlay.card.x"
+            :y2="overlay.card.y"
+            stroke="#102B30"
+            stroke-opacity="0.85"
+            :stroke-width="LINE_W * 2.4"
+            :stroke-dasharray="LINE_DASH"
+          />
+          <line
+            :x1="overlay.dot.x"
+            :y1="overlay.dot.y"
+            :x2="overlay.card.x"
+            :y2="overlay.card.y"
+            :stroke="STROKE[overlay.status]"
+            stroke-opacity="0.85"
+            :stroke-width="LINE_W"
+            :stroke-dasharray="LINE_DASH"
+          />
+          <circle
+            :cx="overlay.dot.x"
+            :cy="overlay.dot.y"
+            :r="DOT_R"
+            fill="none"
+            stroke="#102B30"
+            stroke-opacity="0.85"
+            :stroke-width="LINE_W * 2.6"
+          />
+          <circle
+            :cx="overlay.dot.x"
+            :cy="overlay.dot.y"
+            :r="DOT_R"
+            fill="none"
+            :stroke="STROKE[overlay.status]"
+            :stroke-width="LINE_W"
+            class="animate-pulse-dot"
+          />
+          <circle
+            :cx="overlay.dot.x"
+            :cy="overlay.dot.y"
+            :r="DOT_CORE"
+            :fill="STROKE[overlay.status]"
+            stroke="#102B30"
+            :stroke-width="LINE_W * 0.8"
+          />
+        </g>
+      </svg>
+
+      <!-- Transition clip player: covers the stage while a clip plays, then we
+           hard-cut to the destination still underneath (seamless if the clip's
+           last frame matches it). Hidden/idle when no clip is playing. -->
+      <video
+        ref="videoEl"
+        v-show="clipPlaying"
+        class="pointer-events-none absolute inset-0 h-full w-full object-contain"
+        muted
+        playsinline
+        preload="auto"
+        disablepictureinpicture
+      />
+
+      <!-- Floating overlay cards (HTML, registered to the SVG coordinates).
+           Placeholder-only until OVERLAY_GEOMETRY is retuned to the real art. -->
       <div
         v-if="!store.transition.playing"
         :key="`cards-${viewKey}`"
@@ -304,8 +475,11 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Transition veil while an SVG animation "plays" -->
-      <div v-if="store.transition.playing" class="absolute inset-0 grid place-items-center">
+      <!-- Transition veil (fallback path only — hidden while a clip is playing) -->
+      <div
+        v-if="store.transition.playing && !clipPlaying"
+        class="absolute inset-0 grid place-items-center"
+      >
         <p class="animate-pulse-dot font-mono text-[10px] tracking-[0.3em] text-zain-accent-bright">
           RESOLVING VIEW…
         </p>

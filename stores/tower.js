@@ -27,7 +27,7 @@ export function formatValue({ value }) {
 // Mock telemetry seed
 // One healthy baseline per site, overridden per tower to author the demo
 // scenarios (unauthorized access in Taji, low fuel in Basra, mast tilt alarm
-// in Erbil). Section ids — 'mast' | 'bts' | 'perimeter' — are also the zoom
+// in Erbil). Section ids — 'mast' | 'bts' | 'generator' — are also the zoom
 // targets used by the stage and the panel.
 // ---------------------------------------------------------------------------
 
@@ -80,6 +80,21 @@ function baselineSections() {
           detail: { loadA: 12.4, chargePct: 96, rectifier: 'float' },
         },
         {
+          id: 'door',
+          label: 'Cabinet Door (Reed)',
+          metric: 'Contact state',
+          value: 'CLOSED',
+          unit: '',
+          status: 'ok',
+          detail: { lastChange: '2026-07-12 09:40 UTC', workOrder: 'WO-8841' },
+        },
+      ],
+    },
+    {
+      id: 'generator',
+      label: 'Power Generator',
+      components: [
+        {
           id: 'fuel',
           label: 'Diesel Fuel (Ultrasonic)',
           metric: 'Tank level',
@@ -88,12 +103,6 @@ function baselineSections() {
           status: 'ok',
           detail: { litres: 936, autonomyHrs: 52, thresholdPct: 25 },
         },
-      ],
-    },
-    {
-      id: 'perimeter',
-      label: 'Perimeter & Security',
-      components: [
         {
           id: 'gate',
           label: 'Main Gate (Reed)',
@@ -102,15 +111,6 @@ function baselineSections() {
           unit: '',
           status: 'ok',
           detail: { lastChange: '2026-07-16 21:04 UTC', workOrder: null },
-        },
-        {
-          id: 'door',
-          label: 'Cabinet Door (Reed)',
-          metric: 'Contact state',
-          value: 'CLOSED',
-          unit: '',
-          status: 'ok',
-          detail: { lastChange: '2026-07-12 09:40 UTC', workOrder: 'WO-8841' },
         },
         {
           id: 'pir',
@@ -223,12 +223,13 @@ export const useTowerStore = defineStore('tower', {
     activeStateId: null,
     activeTowerId: null,
 
-    // null = full-tower view, otherwise 'mast' | 'bts' | 'perimeter'
+    // null = full-tower view, otherwise 'mast' | 'bts' | 'generator'
     zoomedSection: null,
 
     // True while an SVG transition (Blender export) plays. Overlays stay
-    // hidden until the stage reports the animation has resolved.
-    transition: { playing: false, name: null },
+    // hidden until the stage reports the animation has resolved. `from`/`to`
+    // ('map' | 'full' | 'mast' | 'bts' | 'generator') pick the clip to play.
+    transition: { playing: false, name: null, from: null, to: null },
 
     // Two-way hover/selection sync between the SVG stage and the panel
     hoveredComponentId: null,
@@ -320,7 +321,7 @@ export const useTowerStore = defineStore('tower', {
       this.zoomedSection = null
       this.selectedComponentId = null
       this.hoveredComponentId = null
-      this.beginTransition('map-to-tower')
+      this.beginTransition('map-to-tower', 'map', 'full')
       return true
     },
 
@@ -329,18 +330,18 @@ export const useTowerStore = defineStore('tower', {
       this.zoomedSection = null
       this.selectedComponentId = null
       this.hoveredComponentId = null
-      this.transition = { playing: false, name: null }
+      this.transition = { playing: false, name: null, from: null, to: null }
     },
 
     zoomIntoSection(sectionId) {
       if (this.zoomedSection === sectionId || this.transition.playing) return
-      this.beginTransition(`zoom-${sectionId}`)
+      this.beginTransition(`zoom-${sectionId}`, this.zoomedSection ?? 'full', sectionId)
       this.zoomedSection = sectionId
     },
 
     zoomOut() {
       if (!this.zoomedSection || this.transition.playing) return
-      this.beginTransition('zoom-out')
+      this.beginTransition('zoom-out', this.zoomedSection, 'full')
       this.zoomedSection = null
       this.selectedComponentId = null
     },
@@ -355,16 +356,17 @@ export const useTowerStore = defineStore('tower', {
       this.hoveredComponentId = componentId
     },
 
-    beginTransition(name) {
-      this.transition = { playing: true, name }
+    beginTransition(name, from = null, to = null) {
+      this.transition = { playing: true, name, from, to }
     },
 
     /**
-     * Called by the stage when the SVG animation resolves — today a timer over
-     * the placeholder CSS transform, later the Blender export's `ended` event.
+     * Called by the stage when the transition resolves — the clip's `ended`
+     * event when a Blender export is present, otherwise a timer over the
+     * placeholder CSS transform.
      */
     finishTransition() {
-      this.transition = { playing: false, name: null }
+      this.transition = { playing: false, name: null, from: null, to: null }
     },
 
     /** Small random drift on numeric readings so the demo feels live. */
