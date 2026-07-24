@@ -202,12 +202,20 @@ function preloadClips() {
   for (const url of PRELOAD_CLIPS) if (url) fetch(url).catch(() => {})
 }
 
+// Once the clip is actually rendering (covering the stage), swap the still
+// underneath to the destination so its SVG is decoded before the clip ends —
+// otherwise the outgoing still flashes for a frame as the video hides.
+function onClipPlaying() {
+  currentStill.value = store.transition.to ?? store.zoomedSection ?? 'full'
+}
+
 function playTransition() {
   const clip = CLIPS_AVAILABLE ? clipUrl(store.transition.from, store.transition.to) : null
   const video = videoEl.value
   if (clip && video) {
     clipPlaying.value = true
     video.src = clip
+    video.addEventListener('playing', onClipPlaying, { once: true })
     video.addEventListener('ended', finishTransition, { once: true })
     video.addEventListener('error', finishTransition, { once: true })
     video.play().catch(finishTransition)
@@ -222,11 +230,12 @@ function finishTransition() {
   clearTimeout(safetyTimer)
   const video = videoEl.value
   if (video) {
+    video.removeEventListener('playing', onClipPlaying)
     video.removeEventListener('ended', finishTransition)
     video.removeEventListener('error', finishTransition)
   }
-  clipPlaying.value = false
   currentStill.value = store.zoomedSection ?? 'full'
+  clipPlaying.value = false
   if (store.transition.playing) store.finishTransition()
 }
 
