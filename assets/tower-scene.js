@@ -16,9 +16,8 @@
 // The themed stills are in place, so the stage renders the real artwork.
 export const STILLS_AVAILABLE = true
 
-// The camera-move clips aren't rendered yet. While this is false the stage
-// cuts straight between stills instead of playing (and preloading) videos.
-export const CLIPS_AVAILABLE = false
+// Camera-move clips are in public/tower/clips (0.8s H.264 MP4, 1280×720).
+export const CLIPS_AVAILABLE = true
 
 // Artwork/clip aspect ratio. Placeholder art is 5:7 (portrait); the Blender
 // render is 1920×1080 (16:9). Switched automatically with STILLS_AVAILABLE.
@@ -43,7 +42,7 @@ export function stillFor(section) {
 // Transition clip for a camera move. from/to ∈ 'map'|'full'|'mast'|'bts'|'generator'.
 export function clipUrl(from, to) {
   if (!from || !to) return null
-  return `${BASE}/clips/${from}-to-${to}.webm`
+  return `${BASE}/clips/${from}-to-${to}.mp4`
 }
 
 // Every clip to warm into cache when the Tower View mounts.

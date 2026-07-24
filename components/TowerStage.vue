@@ -244,7 +244,7 @@ onMounted(() => {
 
 <template>
   <div
-    class="relative flex h-full w-full items-center justify-center p-3 pb-20 lg:p-6 [container-type:size]"
+    class="relative flex h-full w-full items-center justify-center pb-20 lg:p-0 [container-type:size]"
   >
     <div
       class="relative"
