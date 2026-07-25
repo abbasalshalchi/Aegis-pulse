@@ -48,15 +48,25 @@ function detailEntries(component) {
       </p>
     </header>
 
-    <div class="divide-y divide-zain-accent/10">
-      <section v-for="section in store.sections" :key="section.id">
+    <div>
+      <section
+        v-for="section in store.sections"
+        :key="section.id"
+        class="border-b-4 border-zain-dark last:border-b-0"
+      >
+        <!-- A tinted header bar clearly caps each section's sensor group -->
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-zain-accent/5"
+          class="flex w-full items-center gap-2 border-l-2 px-4 py-2.5 text-left transition-colors"
+          :class="
+            store.zoomedSection === section.id
+              ? 'border-zain-accent bg-zain-accent/15'
+              : 'border-transparent bg-zain-dark/50 hover:bg-zain-accent/10'
+          "
           @click="toggleSection(section.id)"
         >
           <span class="status-dot" :class="`status-dot--${store.sectionStatus(section.id)}`" />
-          <span class="text-xs font-semibold uppercase tracking-wider text-zain-light/80">
+          <span class="text-xs font-bold uppercase tracking-wider text-zain-sand">
             {{ section.label }}
           </span>
           <span class="ml-auto font-mono text-[10px] text-zain-accent-bright">
