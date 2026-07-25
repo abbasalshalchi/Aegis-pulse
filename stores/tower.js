@@ -271,7 +271,8 @@ export const useTowerStore = defineStore('tower', {
     sectionSummaries() {
       return this.sections.map((section) => {
         const status = worstStatus(section.components)
-        const headline = section.components.find((c) => c.status === status) ?? section.components[0]
+        const headline =
+          section.components.find((c) => c.status === status) ?? section.components[0]
         return {
           id: section.id,
           label: section.label,
@@ -320,7 +321,9 @@ export const useTowerStore = defineStore('tower', {
     // drifts the numbers every tick but leaves statuses alone.
     statusSignature: (state) =>
       state.towers
-        .flatMap((t) => t.sections.flatMap((s) => s.components.map((c) => `${t.id}:${c.id}:${c.status}`)))
+        .flatMap((t) =>
+          t.sections.flatMap((s) => s.components.map((c) => `${t.id}:${c.id}:${c.status}`)),
+        )
         .join('|'),
 
     // Which section a component id lives in, for a given tower — lets the
