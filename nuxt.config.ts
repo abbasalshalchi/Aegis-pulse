@@ -28,5 +28,12 @@ export default defineNuxtConfig({
     mongoDataUrl: '',
     mongoDataKey: '',
     mongoDataSource: 'AegisCluster',
+
+    // Server-only AI + weather keys for the analysis route (server/api/analysis.post.js).
+    // Never place these under `public` — they must not reach the browser.
+    geminiApiKey: '', // NUXT_GEMINI_API_KEY
+    geminiModel: '', // NUXT_GEMINI_MODEL (defaults to gemini-3.5-flash in the route)
+    weatherApiUrl: '', // NUXT_WEATHER_API_URL (WeatherAPI.com forecast.json endpoint)
+    weatherApiKey: '', // NUXT_WEATHER_API_KEY
   },
 })

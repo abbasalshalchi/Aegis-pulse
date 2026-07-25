@@ -26,18 +26,24 @@
     display: none;
   }
 
-  .status-dot {
-    @apply inline-block h-2 w-2 shrink-0 rounded-full;
-  }
-  .status-dot--ok {
-    @apply bg-status-ok;
-  }
-  .status-dot--warning {
-    @apply bg-status-warning;
-  }
-  .status-dot--critical {
-    @apply animate-pulse-dot bg-status-critical;
-  }
+}
+
+/* Status dots — kept OUT of @layer components on purpose. The variant classes
+   are built dynamically (`status-dot--${status}`), so Tailwind's content scanner
+   never sees them as literals and purges them from the components layer (only
+   status-dot--ok survived, via the literal LIVE indicator in the header). Plain
+   CSS is always emitted, so every variant renders. */
+.status-dot {
+  @apply inline-block h-2 w-2 shrink-0 rounded-full;
+}
+.status-dot--ok {
+  @apply bg-status-ok;
+}
+.status-dot--warning {
+  @apply bg-status-warning;
+}
+.status-dot--critical {
+  @apply animate-pulse-dot bg-status-critical;
 }
 
 /* Route transition used by <NuxtPage> (see app.pageTransition in nuxt.config.ts) */

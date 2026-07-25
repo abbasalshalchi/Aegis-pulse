@@ -6,6 +6,7 @@
 // active governorate/tower, zoomed section, hovered + selected component, and
 // whether an SVG transition (Blender export) is currently playing.
 import { defineStore } from 'pinia'
+import { $fetch } from 'ofetch'
 
 const STATUS_RANK = { ok: 0, warning: 1, critical: 2 }
 
@@ -234,6 +235,14 @@ export const useTowerStore = defineStore('tower', {
     // Two-way hover/selection sync between the SVG stage and the panel
     hoveredComponentId: null,
     selectedComponentId: null,
+
+    // Deep-link target set by the analysis panel, applied once the arrival
+    // transition resolves (see the watcher in layouts/default.vue).
+    pendingFocus: null,
+
+    // AI triage from /api/analysis (Gemini). Populated by fetchAnalysis(); the
+    // dashboard renders around it and never blocks on it.
+    analysis: { data: null, loading: false, error: null, fetchedAt: null },
   }),
 
   getters: {
@@ -301,6 +310,21 @@ export const useTowerStore = defineStore('tower', {
         .flatMap((t) => t.sections)
         .flatMap((s) => s.components)
         .filter((c) => c.status !== 'ok').length,
+
+    // A stable string of every component's status. Watch THIS (not raw values)
+    // to re-run the analysis only when a status actually flips — jitterTelemetry
+    // drifts the numbers every tick but leaves statuses alone.
+    statusSignature: (state) =>
+      state.towers
+        .flatMap((t) => t.sections.flatMap((s) => s.components.map((c) => `${t.id}:${c.id}:${c.status}`)))
+        .join('|'),
+
+    // Which section a component id lives in, for a given tower — lets the
+    // analysis panel deep-link to a specific sensor. Null if not found.
+    sectionForComponent: (state) => (towerId, componentId) => {
+      const tower = state.towers.find((t) => t.id === towerId)
+      return tower?.sections.find((s) => s.components.some((c) => c.id === componentId))?.id ?? null
+    },
   },
 
   actions: {
@@ -352,6 +376,19 @@ export const useTowerStore = defineStore('tower', {
       this.selectedComponentId = this.selectedComponentId === componentId ? null : componentId
     },
 
+    /**
+     * Deep-link focus from the analysis panel (assumes the tower is already
+     * active): zoom the stage into the component's section — unless we're mid-
+     * transition, where zoomIntoSection is a no-op — and select it so the panel
+     * expands its detail.
+     */
+    focusComponent(sectionId, componentId) {
+      if (sectionId && this.zoomedSection !== sectionId && !this.transition.playing) {
+        this.zoomIntoSection(sectionId)
+      }
+      this.selectedComponentId = componentId ?? null
+    },
+
     setHoveredComponent(componentId) {
       this.hoveredComponentId = componentId
     },
@@ -367,6 +404,31 @@ export const useTowerStore = defineStore('tower', {
      */
     finishTransition() {
       this.transition = { playing: false, name: null, from: null, to: null }
+    },
+
+    /**
+     * Post the current telemetry snapshot to /api/analysis and store the parsed
+     * result. The Gemini call happens server-side (the key never reaches here),
+     * and the server dedupes/caches, so calling this on mount + on status change
+     * is cheap. Failures land in analysis.error; they never throw into the UI.
+     */
+    async fetchAnalysis() {
+      if (this.analysis.loading) return
+      this.analysis.loading = true
+      this.analysis.error = null
+      try {
+        const data = await $fetch('/api/analysis', {
+          method: 'POST',
+          body: { towers: this.towers },
+        })
+        if (data?.error) throw new Error(data.error)
+        this.analysis.data = data
+        this.analysis.fetchedAt = Date.now()
+      } catch (err) {
+        this.analysis.error = err?.data?.error ?? err?.message ?? 'Analysis unavailable.'
+      } finally {
+        this.analysis.loading = false
+      }
     },
 
     /** Small random drift on numeric readings so the demo feels live. */

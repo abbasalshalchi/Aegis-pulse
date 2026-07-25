@@ -38,6 +38,14 @@ export default defineConfig([
     rules: { 'vue/multi-word-component-names': 'off' },
   },
 
+  {
+    // Nitro server routes/utils run on the server runtime: Node globals plus
+    // Nitro's injected `$fetch` (see server/api/*.js).
+    name: 'app/server',
+    files: ['server/**/*.{js,mjs}'],
+    languageOptions: { globals: { ...globals.node, $fetch: 'readonly' } },
+  },
+
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
   skipFormatting,
