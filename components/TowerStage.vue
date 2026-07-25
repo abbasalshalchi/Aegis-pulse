@@ -198,6 +198,14 @@ const clipPlaying = ref(false)
 const currentStill = ref(store.zoomedSection ?? 'full')
 let safetyTimer = null
 
+// Arriving from the map (map → full): there's no "source" still to show, so the
+// full still is hidden until the clip finishes — otherwise it pops in before the
+// arrival animation. It stays decoded underneath (opacity only), so the hand-off
+// to the still at the end is still instant.
+const isEntryPending = computed(
+  () => store.transition.playing && store.transition.from === 'map',
+)
+
 function preloadClips() {
   for (const url of PRELOAD_CLIPS) if (url) fetch(url).catch(() => {})
 }
@@ -253,21 +261,27 @@ onMounted(() => {
 
 <template>
   <div
-    class="relative flex h-full w-full items-center justify-center pb-20 lg:p-0 [container-type:size]"
+    class="relative flex h-full w-full items-center justify-center overflow-hidden pb-20 lg:p-0 [container-type:size]"
   >
+    <!-- Crop-to-fit: the 16:9 stage is sized to COVER the section (overflowing
+         one axis) and the parent clips it, so there's no letterbox. Aspect ratio
+         is preserved; the sides/edges are cropped instead. -->
     <div
       class="relative"
       :style="{
         aspectRatio: `${STAGE_ASPECT_W} / ${STAGE_ASPECT_H}`,
-        width: `min(100cqw, calc(${stageAspect} * 100cqh))`,
+        width: `max(100cqw, calc(${stageAspect} * 100cqh))`,
       }"
     >
-      <!-- Static resting state: one self-contained themed vector SVG -->
+      <!-- Static resting state: one self-contained themed vector SVG.
+           Hidden (but kept decoded) during a map → full entry so it doesn't
+           pop in ahead of the arrival clip. -->
       <img
         v-if="STILLS_AVAILABLE"
         :src="stillFor(currentStill)"
         alt=""
         class="pointer-events-none absolute inset-0 h-full w-full object-contain"
+        :class="isEntryPending && 'opacity-0'"
       />
 
       <svg
