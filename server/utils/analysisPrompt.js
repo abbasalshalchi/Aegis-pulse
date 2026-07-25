@@ -36,7 +36,10 @@ Do not invent readings. If weather data is absent, assign severity from telemetr
 alone and set weatherLinked: false everywhere.
 Reference towers by their id and name exactly as given.
 
-Write the summary in 2-3 sentences, in a NOC shift-handover tone. The component
+Write the summary in 2-3 sentences, in a concise, neutral, passive-style tone.
+Do not start with phrases like "NOC shift handover requires", "Shift handover
+triage indicates", or any similar handover framing. Do not mention who is doing
+or saying anything. Avoid first-person or agent-style wording. The component
 field must be the component id. Keep cause and recommendedAction to one sentence
 each; recommendedAction must be concretely actionable.`
 
