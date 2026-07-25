@@ -195,7 +195,7 @@ const TOWERS = [
   }),
   makeTower({
     id: 'TWR-EBL-003',
-    name: 'Salahaddin Ridge',
+    name: 'Erbil Heights',
     stateId: 'erbil',
     plot: { u: 0.45, v: 0.5 },
     sla: 98.9,

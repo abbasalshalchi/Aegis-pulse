@@ -39,9 +39,13 @@ Reference towers by their id and name exactly as given.
 Write the summary in 2-3 sentences, in a concise, neutral, passive-style tone.
 Do not start with phrases like "NOC shift handover requires", "Shift handover
 triage indicates", or any similar handover framing. Do not mention who is doing
-or saying anything. Avoid first-person or agent-style wording. The component
-field must be the component id. Keep cause and recommendedAction to one sentence
-each; recommendedAction must be concretely actionable.`
+or saying anything. Avoid first-person or agent-style wording. For each alert,
+state the specific issue clearly and separately: name the affected component,
+explain the observed condition from the telemetry or weather data, and keep the
+cause focused on that evidence. Do not create broader stories or speculative
+actions. The component field must be the component id. Keep cause and
+recommendedAction to one sentence each; recommendedAction must be concretely
+actionable and limited to what is directly supported by the data.`
 
 // Schema handed to Gemini (generationConfig.responseSchema) AND used to validate
 // the parsed reply before we trust it.
