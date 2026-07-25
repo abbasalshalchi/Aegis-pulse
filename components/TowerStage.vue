@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { formatValue, useTowerStore } from '~/stores/tower'
 import {
   CLIPS_AVAILABLE,
@@ -148,21 +148,55 @@ const zoomStyle = computed(() => {
   }
 })
 
+// Approx card footprint (incl. the 8px gap) used to keep it fully in view.
+const CARD_W_PX = 200
+const CARD_H_PX = 96
+
+function clamp(v, lo, hi) {
+  return lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi)
+}
+
+// Pull a card's anchor into the visible window when the stage is cropped, so
+// the whole card (and its leader line's far end) stays on screen.
+function clampCard(overlay) {
+  const { vw, vh, bw, bh } = box.value
+  const fx = Math.min(1, vw / bw)
+  const fy = Math.min(1, vh / bh)
+  const visX0 = ((1 - fx) / 2) * VIEW_W
+  const visX1 = ((1 + fx) / 2) * VIEW_W
+  const visY0 = ((1 - fy) / 2) * VIEW_H
+  const visY1 = ((1 + fy) / 2) * VIEW_H
+  const cardW = (CARD_W_PX / bw) * VIEW_W
+  const cardH = (CARD_H_PX / bh) * VIEW_H
+  const x =
+    overlay.side === 'right'
+      ? clamp(overlay.card.x, visX0, visX1 - cardW)
+      : clamp(overlay.card.x, visX0 + cardW, visX1)
+  const y = clamp(overlay.card.y, visY0 + cardH / 2, visY1 - cardH / 2)
+  return { x, y }
+}
+
 // Live store data merged with the geometry for the current view: aggregate
-// section cards in the overview, per-sensor cards when zoomed in.
+// section cards in the overview, per-sensor cards when zoomed in. `cardPos` is
+// the card anchor clamped into the visible (cropped) area.
 const overlays = computed(() => {
   const geometry = OVERLAY_GEOMETRY[viewKey.value]
   const source =
     viewKey.value === 'overview'
       ? store.sectionSummaries
       : (store.visibleSections[0]?.components ?? [])
-  return source.filter((item) => geometry[item.id]).map((item) => ({ ...item, ...geometry[item.id] }))
+  return source
+    .filter((item) => geometry[item.id])
+    .map((item) => {
+      const overlay = { ...item, ...geometry[item.id] }
+      return { ...overlay, cardPos: clampCard(overlay) }
+    })
 })
 
 function cardStyle(overlay) {
   return {
-    left: `${(overlay.card.x / VIEW_W) * 100}%`,
-    top: `${(overlay.card.y / VIEW_H) * 100}%`,
+    left: `${(overlay.cardPos.x / VIEW_W) * 100}%`,
+    top: `${(overlay.cardPos.y / VIEW_H) * 100}%`,
     transform:
       overlay.side === 'left' ? 'translate(calc(-100% - 8px), -50%)' : 'translate(8px, -50%)',
   }
@@ -193,6 +227,34 @@ const scopeLabel = computed(() =>
 // false the stage keeps the built-in placeholder art + CSS-zoom fallback so the
 // app works before the exports land (see assets/tower-scene.js).
 const stageAspect = STAGE_ASPECT_W / STAGE_ASPECT_H
+
+// --- Crop-to-fill, with a limit -------------------------------------------
+// How far the 16:9 stage may scale beyond a plain fit in order to cover the
+// section. 0 = never crop (always letterbox); 1 = up to 2× (heavy crop); the
+// stage stops cropping past this and letterboxes the remainder. Tune to taste.
+const MAX_CROP = 0.75
+
+const fitW = `min(100cqw, calc(${stageAspect} * 100cqh))`
+const coverW = `max(100cqw, calc(${stageAspect} * 100cqh))`
+// cover, but never wider than (1 + MAX_CROP)× the plain fit
+const stageWidth = `min(${coverW}, calc(${1 + MAX_CROP} * ${fitW}))`
+
+// Measure the visible area (stage root) vs the full stage box so overlay cards
+// can be clamped into view when the box overflows (is cropped).
+const stageRootEl = ref(null)
+const stageBoxEl = ref(null)
+// Large defaults so clamping is a no-op until the real measurement arrives.
+const box = ref({ vw: 1e6, vh: 1e6, bw: 1e6, bh: 1e6 })
+let resizeObs = null
+function measureStage() {
+  const root = stageRootEl.value
+  const boxEl = stageBoxEl.value
+  if (!root || !boxEl) return
+  const r = root.getBoundingClientRect()
+  const b = boxEl.getBoundingClientRect()
+  box.value = { vw: r.width, vh: r.height, bw: b.width || 1, bh: b.height || 1 }
+}
+
 const videoEl = ref(null)
 const clipPlaying = ref(false)
 const currentStill = ref(store.zoomedSection ?? 'full')
@@ -249,6 +311,10 @@ function finishTransition() {
 
 onMounted(() => {
   if (CLIPS_AVAILABLE) preloadClips()
+  measureStage()
+  resizeObs = new ResizeObserver(measureStage)
+  if (stageRootEl.value) resizeObs.observe(stageRootEl.value)
+  if (stageBoxEl.value) resizeObs.observe(stageBoxEl.value)
   watch(
     () => store.transition.playing,
     (playing) => {
@@ -257,20 +323,24 @@ onMounted(() => {
     { immediate: true },
   )
 })
+
+onUnmounted(() => resizeObs?.disconnect())
 </script>
 
 <template>
   <div
+    ref="stageRootEl"
     class="relative flex h-full w-full items-center justify-center overflow-hidden pb-20 lg:p-0 [container-type:size]"
   >
-    <!-- Crop-to-fit: the 16:9 stage is sized to COVER the section (overflowing
-         one axis) and the parent clips it, so there's no letterbox. Aspect ratio
-         is preserved; the sides/edges are cropped instead. -->
+    <!-- Crop-to-fit: the 16:9 stage is sized to cover the section (overflowing
+         one axis, capped by MAX_CROP) and the parent clips it — no letterbox,
+         aspect ratio preserved, the sides/edges cropped instead. -->
     <div
-      class="relative"
+      ref="stageBoxEl"
+      class="relative shrink-0"
       :style="{
         aspectRatio: `${STAGE_ASPECT_W} / ${STAGE_ASPECT_H}`,
-        width: `max(100cqw, calc(${stageAspect} * 100cqh))`,
+        width: stageWidth,
       }"
     >
       <!-- Static resting state: one self-contained themed vector SVG.
@@ -403,8 +473,8 @@ onMounted(() => {
           <line
             :x1="overlay.dot.x"
             :y1="overlay.dot.y"
-            :x2="overlay.card.x"
-            :y2="overlay.card.y"
+            :x2="overlay.cardPos.x"
+            :y2="overlay.cardPos.y"
             stroke="#102B30"
             stroke-opacity="0.85"
             :stroke-width="LINE_W * 2.4"
@@ -413,8 +483,8 @@ onMounted(() => {
           <line
             :x1="overlay.dot.x"
             :y1="overlay.dot.y"
-            :x2="overlay.card.x"
-            :y2="overlay.card.y"
+            :x2="overlay.cardPos.x"
+            :y2="overlay.cardPos.y"
             :stroke="STROKE[overlay.status]"
             stroke-opacity="0.85"
             :stroke-width="LINE_W"
