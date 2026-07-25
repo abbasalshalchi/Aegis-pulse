@@ -8,6 +8,10 @@
 import { defineStore } from 'pinia'
 import { $fetch } from 'ofetch'
 
+// Non-reactive guard so overlapping analysis requests (the 2s poll firing while a
+// slow Gemini call is still in flight) collapse into one.
+let analysisBusy = false
+
 const STATUS_RANK = { ok: 0, warning: 1, critical: 2 }
 
 export function worstStatus(items) {
@@ -412,22 +416,36 @@ export const useTowerStore = defineStore('tower', {
      * and the server dedupes/caches, so calling this on mount + on status change
      * is cheap. Failures land in analysis.error; they never throw into the UI.
      */
-    async fetchAnalysis() {
-      if (this.analysis.loading) return
-      this.analysis.loading = true
-      this.analysis.error = null
+    async fetchAnalysis(opts = {}) {
+      // `silent` = a background poll: don't toggle the visible loading flag (no
+      // skeleton/button flicker) and don't overwrite good data with a transient
+      // error. The explicit Re-analyse button and the status watcher run loud.
+      const silent = opts.silent === true
+      const force = opts.force === true // Re-analyse: bypass the server cache
+      if (analysisBusy) return
+      analysisBusy = true
+      if (!silent) {
+        this.analysis.loading = true
+        this.analysis.error = null
+      }
       try {
         const data = await $fetch('/api/analysis', {
           method: 'POST',
-          body: { towers: this.towers },
+          body: { towers: this.towers, force },
         })
         if (data?.error) throw new Error(data.error)
         this.analysis.data = data
+        this.analysis.error = null
         this.analysis.fetchedAt = Date.now()
       } catch (err) {
-        this.analysis.error = err?.data?.error ?? err?.message ?? 'Analysis unavailable.'
+        // Keep the last good analysis on a quiet poll failure; only surface an
+        // error when it's loud, or when we've got nothing to show yet.
+        if (!silent || !this.analysis.data) {
+          this.analysis.error = err?.data?.error ?? err?.message ?? 'Analysis unavailable.'
+        }
       } finally {
-        this.analysis.loading = false
+        analysisBusy = false
+        if (!silent) this.analysis.loading = false
       }
     },
 

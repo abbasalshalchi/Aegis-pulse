@@ -32,6 +32,7 @@ const cache = new Map() // hash → { result, timestamp }
 let lastResult = null // most recent success, reused on the 60s floor and on 429
 let lastCallAt = 0 // when we last hit Gemini
 const CALL_FLOOR_MS = 60_000 // never call Gemini more than once per minute
+const CACHE_TTL_MS = 10 * 60_000 // serve a cached analysis for 10 min, then refresh
 const CACHE_MAX = 50
 
 async function sha256Hex(str) {
@@ -97,6 +98,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event)
   const towers = body?.towers
+  const force = body?.force === true // Re-analyse button: skip the cache
   if (!Array.isArray(towers) || towers.length === 0) {
     setResponseStatus(event, 400)
     return { error: 'Request body must include a non-empty { towers } array.' }
@@ -123,12 +125,17 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // 3. Hash the (rounded) state + hourly weather window. Cache hit → done.
+  // 3. Hash the (rounded) state + hourly weather window. A fresh cache hit is
+  // served as-is UNLESS the caller forced a refresh (Re-analyse) or the entry has
+  // gone stale (older than CACHE_TTL_MS) — otherwise the analysis could sit
+  // unchanged for the whole weather window even when the operator asks for more.
   const weatherWindow = weatherAvailable ? String(Math.floor(Date.now() / 3_600_000)) : 'no-weather'
   const hash = await sha256Hex(hashInput(towers, weatherWindow))
 
   const hit = cache.get(hash)
-  if (hit) return { ...hit.result, cached: true }
+  if (hit && !force && Date.now() - hit.timestamp < CACHE_TTL_MS) {
+    return { ...hit.result, cached: true }
+  }
 
   // Floor: never hit Gemini more than once per minute, regardless of the last
   // call's OUTCOME. This guards against jitter churn AND against a rate-limited

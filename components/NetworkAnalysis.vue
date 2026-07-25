@@ -63,6 +63,10 @@ const fetchedTime = computed(() =>
     ? new Date(result.value.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null,
 )
+
+// Background polls are silent (don't set loading), so "still warming up" is
+// "no result and no error yet", and the button is busy during that or a loud call.
+const busy = computed(() => analysis.value.loading || (!result.value && !analysis.value.error))
 </script>
 
 <template>
@@ -77,16 +81,16 @@ const fetchedTime = computed(() =>
       <button
         type="button"
         class="shrink-0 rounded border border-zain-accent/40 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-zain-sand transition-colors hover:border-zain-accent disabled:opacity-40"
-        :disabled="analysis.loading"
-        @click="store.fetchAnalysis()"
+        :disabled="busy"
+        @click="store.fetchAnalysis({ force: true })"
       >
-        {{ analysis.loading ? 'Analysing…' : '↻ Re-analyse' }}
+        {{ busy ? 'Analysing…' : '↻ Re-analyse' }}
       </button>
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <!-- Loading skeleton (only when there's nothing to show yet) -->
-      <div v-if="analysis.loading && !result" class="space-y-3 px-4 py-4">
+      <!-- Warming up — nothing to show yet (polls are silent, so key off data) -->
+      <div v-if="!result && !analysis.error" class="space-y-3 px-4 py-4">
         <div class="h-5 w-24 animate-pulse rounded bg-zain-accent/15" />
         <div class="h-3 w-full animate-pulse rounded bg-zain-accent/10" />
         <div class="h-3 w-4/5 animate-pulse rounded bg-zain-accent/10" />
@@ -102,7 +106,7 @@ const fetchedTime = computed(() =>
         <p class="text-xs font-semibold text-zain-alert-soft">Analysis unavailable</p>
         <p class="mt-1 text-[11px] leading-relaxed text-zain-light/60">{{ analysis.error }}</p>
         <p class="mt-2 text-[10px] text-zain-light/40">
-          Live telemetry below is unaffected — this only pauses the AI summary.
+          The rest of the dashboard is unaffected — use Re-analyse to try again.
         </p>
       </div>
 

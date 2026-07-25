@@ -10,18 +10,21 @@ const SECTION_LABELS = { mast: 'Main Mast', bts: 'BTS Cabinet', generator: 'Powe
 
 // --- AI triage drawer ------------------------------------------------------
 const analysisOpen = ref(false)
-const urgentCount = computed(
-  () => (store.analysis.data?.alerts ?? []).filter((a) => a.severity === 'urgent').length,
-)
+// Single source of truth for the header count: the number of alerts the AI
+// analysis flagged. Both header tags show this and both open the drawer.
+const aiAlertCount = computed(() => store.analysis.data?.alerts?.length ?? 0)
 
-// Analyse once when the dashboard mounts (the layout persists across route
-// changes, so this fires once per session), and again whenever a tower's status
-// set changes — watching the status signature, not raw values, so jitter drift
-// doesn't trigger it. No polling; the server dedupes and rate-floors the call.
-onMounted(() => store.fetchAnalysis())
+// On first load, force a fresh analysis (same as the Re-analyse button) so the
+// page always starts from a current result rather than a stale cached one. The
+// layout persists across route changes, so this fires once per session. No
+// polling; after this it refreshes only on an actual tower status change — watch
+// the status signature, not raw values, so jitter drift doesn't trigger it — or
+// the explicit Re-analyse button. (The server's 60s floor still caps how often a
+// forced call actually reaches Gemini, so rapid reloads won't stack up.)
+onMounted(() => store.fetchAnalysis({ force: true }))
 watch(
   () => store.statusSignature,
-  () => store.fetchAnalysis(),
+  () => store.fetchAnalysis({ silent: true }),
 )
 
 // Apply a deep-link focus from the analysis panel once the arrival transition
@@ -113,22 +116,24 @@ function goState() {
           <span>✦ AI</span>
           <span class="hidden sm:inline">Triage</span>
           <span
-            v-if="urgentCount"
+            v-if="aiAlertCount"
             class="rounded bg-status-critical/20 px-1 font-mono text-status-critical"
           >
-            {{ urgentCount }}
+            {{ aiAlertCount }}
           </span>
           <span
             v-else-if="store.analysis.loading"
             class="h-1.5 w-1.5 animate-pulse rounded-full bg-zain-accent-bright"
           />
         </button>
-        <span
-          v-if="store.networkAlertCount"
-          class="hidden rounded border border-zain-alert/40 bg-zain-alert/15 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-zain-alert-soft sm:inline"
+        <button
+          v-if="aiAlertCount"
+          type="button"
+          class="hidden rounded border border-zain-alert/40 bg-zain-alert/15 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-zain-alert-soft transition-colors hover:border-zain-alert sm:inline"
+          @click="analysisOpen = true"
         >
-          ⚠ {{ store.networkAlertCount }} alerts
-        </span>
+          ⚠ {{ aiAlertCount }} alerts
+        </button>
         <span
           class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.25em] text-zain-accent-bright"
         >
