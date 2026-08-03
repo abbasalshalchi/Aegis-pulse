@@ -14,7 +14,7 @@
    },
    "width": 1280,
    "height": 720,
-   "elements": 2008
+   "elements": 1986
   },
   {
    "file": "tower.generator_cam.svg",
@@ -28,7 +28,7 @@
    },
    "width": 1280,
    "height": 720,
-   "elements": 2040
+   "elements": 2018
   },
   {
    "file": "tower.map_cam.svg",
@@ -42,7 +42,7 @@
    },
    "width": 1280,
    "height": 720,
-   "elements": 2108
+   "elements": 2083
   },
   {
    "file": "tower.tower_cam.svg",
@@ -56,7 +56,7 @@
    },
    "width": 1280,
    "height": 720,
-   "elements": 2044
+   "elements": 2020
   }
  ]
 }

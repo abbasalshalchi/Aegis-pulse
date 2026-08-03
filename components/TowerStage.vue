@@ -305,7 +305,13 @@ const currentStillMarkup = computed(
 // means leaving it visible would ghost the final frame behind the whole move.
 // Hide it for the duration — `opacity-0` keeps it mounted and decoded, so
 // revealing it at the end is still instant.
-const stillHidden = computed(() => store.transition.playing)
+//
+// Gate this on the player having painted, not on the transition starting. The
+// element has to fetch and parse the clip before it can draw anything, and
+// hiding the still on click blanks the stage for that whole window — the
+// overlays are already gone by then, so there is nothing left on screen.
+const clipPainted = ref(false)
+const stillHidden = computed(() => store.transition.playing && clipPainted.value)
 
 const transitionSrc = computed(() => transitionUrl(store.transition.from, store.transition.to))
 const transitionReverse = computed(() =>
@@ -335,6 +341,7 @@ function transitionShouldReverse(from, to) {
 async function playTransition() {
   const run = ++transitionRun
 
+  clipPainted.value = false
   clearTimeout(safetyTimer)
   safetyTimer = null
 
@@ -364,6 +371,10 @@ function onTransitionLoad() {
   if (transitionReverse.value) transitionPlayerEl.value.reverse()
   else transitionPlayerEl.value.play()
 
+  // play()/reverse() paint the first frame synchronously, so the canvas is
+  // covered the moment this returns and the still can go without a gap.
+  clipPainted.value = true
+
   // The animation now covers the stage, so swap the still underneath to the
   // destination while it is hidden. Leaving this until the animation ends means
   // the <img> src changes at the same instant the player disappears, and the
@@ -379,6 +390,7 @@ function onTransitionError() {
 
 function finishTransition() {
   transitionRun += 1
+  clipPainted.value = false
   clearTimeout(safetyTimer)
   safetyTimer = null
   currentStill.value = store.transition.to ?? store.zoomedSection ?? 'full'
