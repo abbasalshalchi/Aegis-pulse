@@ -1,30 +1,29 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { formatValue, useTowerStore } from '~/stores/tower'
-import {
-  CLIPS_AVAILABLE,
-  PRELOAD_CLIPS,
-  STAGE_ASPECT_H,
-  STAGE_ASPECT_W,
-  STILLS_AVAILABLE,
-  clipUrl,
-  stillFor,
-} from '~/assets/tower-scene.js'
+import { STAGE_ASPECT_H, STAGE_ASPECT_W, STILLS_AVAILABLE } from '~/assets/tower-scene.js'
+import { fetchDocument } from '~/InterVG/src/index.js'
+import mapTransitionUrl from '~/assets/InterVG/tower.map_cam.svg?url'
+import towerTransitionUrl from '~/assets/InterVG/tower.tower_cam.svg?url'
+import btsTransitionUrl from '~/assets/InterVG/tower.bts_cam.svg?url'
+import generatorTransitionUrl from '~/assets/InterVG/tower.generator_cam.svg?url'
 
 // ---------------------------------------------------------------------------
-// Tower stage — placeholder implementation.
+// Tower stage — everything comes out of the baked IVG files.
 //
-// The line-art tower + CSS scale transforms stand in for the Blender-exported
-// SVG animations. When those land:
-//   1. replace the contents of the "artwork" group with the export,
-//   2. play the matching animation when store.transition.playing turns true,
-//   3. call store.finishTransition() from the animation's `ended` event
-//      instead of the timer at the bottom of this script,
-//   4. retune OVERLAY_GEOMETRY to the new artwork's coordinates.
+// Each .svg carries the camera move *and* the two resting states it runs
+// between, so the stills are lifted straight out of the same files rather than
+// maintained as a second set of exports that can drift out of sync with them.
+// Every clip is baked detail → wide, which covers all four views:
 //
-// Everything is drawn in viewBox 0 0 500 700. The wrapper div is forced to the
-// same 5:7 aspect ratio via container-query units, so the HTML overlay cards
-// (positioned in %) stay registered with the SVG coordinates at any size.
+//   full       ← the end state of any clip
+//   mast       ← the start state of tower_cam
+//   bts        ← the start state of bts_cam
+//   generator  ← the start state of generator_cam
+//
+// The overlay cards and leader lines are drawn in their own 1920×1080 space.
+// The artwork is 1280×720; both are 16:9 and both fill the stage box, so the
+// coordinates stay registered without rescaling.
 // ---------------------------------------------------------------------------
 
 const store = useTowerStore()
@@ -222,10 +221,8 @@ const scopeLabel = computed(() =>
 
 // --- Cinematic transitions -------------------------------------------------
 // Resting states are pre-rendered vector line-art + a raster fill; the camera
-// moves between them are pre-rendered clips (Blender). The clip plays over the
-// stage, then we hard-cut to the destination still. While CLIPS_AVAILABLE is
-// false the stage keeps the built-in placeholder art + CSS-zoom fallback so the
-// app works before the exports land (see assets/tower-scene.js).
+// moves between them are baked IVG SVG animations. The player runs over the
+// stage, then we hard-cut to the destination still.
 const stageAspect = STAGE_ASPECT_W / STAGE_ASPECT_H
 
 // --- Crop-to-fill, with a limit -------------------------------------------
@@ -255,72 +252,162 @@ function measureStage() {
   box.value = { vw: r.width, vh: r.height, bw: b.width || 1, bh: b.height || 1 }
 }
 
-const videoEl = ref(null)
+const transitionPlayerEl = ref(null)
 const clipPlaying = ref(false)
 const currentStill = ref(store.zoomedSection ?? 'full')
 let safetyTimer = null
+let transitionRun = 0
 
-// Arriving from the map (map → full): there's no "source" still to show, so the
-// full still is hidden until the clip finishes — otherwise it pops in before the
-// arrival animation. It stays decoded underneath (opacity only), so the hand-off
-// to the still at the end is still instant.
-const isEntryPending = computed(
-  () => store.transition.playing && store.transition.from === 'map',
-)
-
-function preloadClips() {
-  for (const url of PRELOAD_CLIPS) if (url) fetch(url).catch(() => {})
+const TRANSITION_URLS = {
+  map: mapTransitionUrl,
+  tower: towerTransitionUrl,
+  bts: btsTransitionUrl,
+  generator: generatorTransitionUrl,
 }
 
-// Once the clip is actually rendering (covering the stage), swap the still
-// underneath to the destination so its SVG is decoded before the clip ends —
-// otherwise the outgoing still flashes for a frame as the video hides.
-function onClipPlaying() {
+// Which clip each resting state is lifted out of, and which end of it.
+const STILL_SOURCES = {
+  full: { url: towerTransitionUrl, state: 'end' },
+  mast: { url: towerTransitionUrl, state: 'start' },
+  bts: { url: btsTransitionUrl, state: 'start' },
+  generator: { url: generatorTransitionUrl, state: 'start' },
+}
+
+// section → the state's SVG markup, rendered inline so it stays real DOM:
+// hoverable, themeable, and inspectable, exactly like the clips it came from.
+const stillMarkup = ref({})
+const docCache = new Map()
+
+function loadClip(url) {
+  if (!docCache.has(url)) docCache.set(url, fetchDocument(url))
+  return docCache.get(url)
+}
+
+async function loadStill(section) {
+  const source = STILL_SOURCES[section]
+  if (!source || stillMarkup.value[section]) return
+  try {
+    const doc = await loadClip(source.url)
+    const markup = doc.states?.[source.state]
+    if (markup) stillMarkup.value = { ...stillMarkup.value, [section]: markup }
+  } catch {
+    // leave the slot empty; the stage simply shows nothing behind the overlays
+  }
+}
+
+const currentStillMarkup = computed(
+  () => stillMarkup.value[currentStill.value] ?? stillMarkup.value.full ?? '',
+)
+
+// The IVG player draws onto a transparent canvas, so whatever sits underneath
+// shows through it. The still is swapped to the destination as soon as the
+// animation covers the stage (so it is decoded before the hand-off), which
+// means leaving it visible would ghost the final frame behind the whole move.
+// Hide it for the duration — `opacity-0` keeps it mounted and decoded, so
+// revealing it at the end is still instant.
+const stillHidden = computed(() => store.transition.playing)
+
+const transitionSrc = computed(() => transitionUrl(store.transition.from, store.transition.to))
+const transitionReverse = computed(() =>
+  transitionShouldReverse(store.transition.from, store.transition.to),
+)
+
+function transitionUrl(from, to) {
+  if (from === 'map' && to === 'full') return TRANSITION_URLS.map
+  if ((from === 'full' && to === 'mast') || (from === 'mast' && to === 'full'))
+    return TRANSITION_URLS.tower
+  if ((from === 'full' && to === 'bts') || (from === 'bts' && to === 'full'))
+    return TRANSITION_URLS.bts
+  if ((from === 'full' && to === 'generator') || (from === 'generator' && to === 'full')) {
+    return TRANSITION_URLS.generator
+  }
+  return null
+}
+
+// Every baked clip runs detail → wide (verify with `npx ivg info <file>`, which
+// reports "moves OUT"). So pulling back to the full view is the forward
+// direction, and zooming into a section is the reverse. Arriving from the map
+// is also forward — that clip starts on an empty frame and flies the site in.
+function transitionShouldReverse(from, to) {
+  return from === 'full'
+}
+
+async function playTransition() {
+  const run = ++transitionRun
+
+  clearTimeout(safetyTimer)
+  safetyTimer = null
+
+  if (!transitionSrc.value) {
+    safetyTimer = setTimeout(finishTransition, TRANSITION_MS)
+    return
+  }
+
+  clipPlaying.value = true
+  await nextTick()
+  if (run !== transitionRun || !store.transition.playing) {
+    clipPlaying.value = false
+    return
+  }
+
+  if (!transitionPlayerEl.value) {
+    clipPlaying.value = false
+    safetyTimer = setTimeout(finishTransition, TRANSITION_MS)
+    return
+  }
+
+  safetyTimer = setTimeout(finishTransition, 6000) // animation stalled / never ends
+}
+
+function onTransitionLoad() {
+  if (!store.transition.playing || !transitionPlayerEl.value) return
+  if (transitionReverse.value) transitionPlayerEl.value.reverse()
+  else transitionPlayerEl.value.play()
+
+  // The animation now covers the stage, so swap the still underneath to the
+  // destination while it is hidden. Leaving this until the animation ends means
+  // the <img> src changes at the same instant the player disappears, and the
+  // outgoing still flashes for a frame while the new one decodes.
   currentStill.value = store.transition.to ?? store.zoomedSection ?? 'full'
 }
 
-function playTransition() {
-  const clip = CLIPS_AVAILABLE ? clipUrl(store.transition.from, store.transition.to) : null
-  const video = videoEl.value
-  if (clip && video) {
-    clipPlaying.value = true
-    video.src = clip
-    video.addEventListener('playing', onClipPlaying, { once: true })
-    video.addEventListener('ended', finishTransition, { once: true })
-    video.addEventListener('error', finishTransition, { once: true })
-    video.play().catch(finishTransition)
-    safetyTimer = setTimeout(finishTransition, 6000) // clip stalled / never ends
-  } else {
-    // No clip: let the CSS transform settle, then resolve (placeholder path).
-    safetyTimer = setTimeout(finishTransition, TRANSITION_MS)
-  }
+function onTransitionError() {
+  clipPlaying.value = false
+  clearTimeout(safetyTimer)
+  safetyTimer = setTimeout(finishTransition, TRANSITION_MS)
 }
 
 function finishTransition() {
+  transitionRun += 1
   clearTimeout(safetyTimer)
-  const video = videoEl.value
-  if (video) {
-    video.removeEventListener('playing', onClipPlaying)
-    video.removeEventListener('ended', finishTransition)
-    video.removeEventListener('error', finishTransition)
-  }
-  currentStill.value = store.zoomedSection ?? 'full'
+  safetyTimer = null
+  currentStill.value = store.transition.to ?? store.zoomedSection ?? 'full'
   clipPlaying.value = false
   if (store.transition.playing) store.finishTransition()
 }
 
 onMounted(() => {
-  if (CLIPS_AVAILABLE) preloadClips()
   measureStage()
   resizeObs = new ResizeObserver(measureStage)
   if (stageRootEl.value) resizeObs.observe(stageRootEl.value)
   if (stageBoxEl.value) resizeObs.observe(stageBoxEl.value)
+
+  // The view on screen first, then the rest in the background. Each clip is
+  // parsed once and cached, so the transition that follows reuses it.
+  loadStill(currentStill.value)
+  for (const section of Object.keys(STILL_SOURCES)) loadStill(section)
+
   watch(
     () => store.transition.playing,
     (playing) => {
       if (playing) playTransition()
     },
     { immediate: true },
+  )
+  // make sure the destination artwork is parsed before the hand-off
+  watch(
+    () => store.transition.to,
+    (to) => to && loadStill(to),
   )
 })
 
@@ -343,15 +430,15 @@ onUnmounted(() => resizeObs?.disconnect())
         width: stageWidth,
       }"
     >
-      <!-- Static resting state: one self-contained themed vector SVG.
-           Hidden (but kept decoded) during a map → full entry so it doesn't
-           pop in ahead of the arrival clip. -->
-      <img
+      <!-- Static resting state, lifted out of the matching IVG clip and
+           rendered inline so it stays real DOM rather than a flat image.
+           Hidden (but kept mounted) for the whole of a transition, so it never
+           shows through the player's transparent canvas. -->
+      <div
         v-if="STILLS_AVAILABLE"
-        :src="stillFor(currentStill)"
-        alt=""
-        class="pointer-events-none absolute inset-0 h-full w-full object-contain"
-        :class="isEntryPending && 'opacity-0'"
+        class="pointer-events-none absolute inset-0 h-full w-full [&>svg]:h-full [&>svg]:w-full"
+        :class="stillHidden && 'opacity-0'"
+        v-html="currentStillMarkup"
       />
 
       <svg
@@ -374,7 +461,14 @@ onUnmounted(() => resizeObs?.disconnect())
           :style="zoomStyle"
         >
           <!-- ground -->
-          <line x1="40" y1="620" x2="460" y2="620" class="stroke-zain-accent/50" stroke-width="1.5" />
+          <line
+            x1="40"
+            y1="620"
+            x2="460"
+            y2="620"
+            class="stroke-zain-accent/50"
+            stroke-width="1.5"
+          />
 
           <!-- perimeter fence, gate, PIR -->
           <g>
@@ -388,21 +482,90 @@ onUnmounted(() => resizeObs?.disconnect())
               class="stroke-zain-accent/50"
               stroke-width="1.2"
             />
-            <line x1="60" y1="578" x2="440" y2="578" class="stroke-zain-accent/40" stroke-width="1" />
-            <line x1="60" y1="600" x2="440" y2="600" class="stroke-zain-accent/40" stroke-width="1" />
-            <line x1="100" y1="566" x2="100" y2="620" class="stroke-zain-sand/70" stroke-width="1.5" />
-            <line x1="140" y1="566" x2="140" y2="620" class="stroke-zain-sand/70" stroke-width="1.5" />
-            <line x1="100" y1="578" x2="140" y2="600" class="stroke-zain-sand/70" stroke-width="1.2" />
+            <line
+              x1="60"
+              y1="578"
+              x2="440"
+              y2="578"
+              class="stroke-zain-accent/40"
+              stroke-width="1"
+            />
+            <line
+              x1="60"
+              y1="600"
+              x2="440"
+              y2="600"
+              class="stroke-zain-accent/40"
+              stroke-width="1"
+            />
+            <line
+              x1="100"
+              y1="566"
+              x2="100"
+              y2="620"
+              class="stroke-zain-sand/70"
+              stroke-width="1.5"
+            />
+            <line
+              x1="140"
+              y1="566"
+              x2="140"
+              y2="620"
+              class="stroke-zain-sand/70"
+              stroke-width="1.5"
+            />
+            <line
+              x1="100"
+              y1="578"
+              x2="140"
+              y2="600"
+              class="stroke-zain-sand/70"
+              stroke-width="1.2"
+            />
             <!-- PIR head on its pole -->
-            <line x1="180" y1="620" x2="180" y2="549" class="stroke-zain-sand/50" stroke-width="1.5" />
-            <rect x="174" y="540" width="12" height="9" rx="2" class="fill-zain-accent/40 stroke-zain-accent" stroke-width="1" />
-            <path d="M186 549 q14 6 18 20" fill="none" class="stroke-zain-accent/40" stroke-dasharray="2 3" />
+            <line
+              x1="180"
+              y1="620"
+              x2="180"
+              y2="549"
+              class="stroke-zain-sand/50"
+              stroke-width="1.5"
+            />
+            <rect
+              x="174"
+              y="540"
+              width="12"
+              height="9"
+              rx="2"
+              class="fill-zain-accent/40 stroke-zain-accent"
+              stroke-width="1"
+            />
+            <path
+              d="M186 549 q14 6 18 20"
+              fill="none"
+              class="stroke-zain-accent/40"
+              stroke-dasharray="2 3"
+            />
           </g>
 
           <!-- mast lattice + antenna head -->
           <g>
-            <line x1="235" y1="170" x2="216" y2="620" class="stroke-zain-sand/70" stroke-width="2" />
-            <line x1="265" y1="170" x2="284" y2="620" class="stroke-zain-sand/70" stroke-width="2" />
+            <line
+              x1="235"
+              y1="170"
+              x2="216"
+              y2="620"
+              class="stroke-zain-sand/70"
+              stroke-width="2"
+            />
+            <line
+              x1="265"
+              y1="170"
+              x2="284"
+              y2="620"
+              class="stroke-zain-sand/70"
+              stroke-width="2"
+            />
             <line
               v-for="(brace, i) in MAST_BRACES"
               :key="i"
@@ -410,31 +573,154 @@ onUnmounted(() => resizeObs?.disconnect())
               class="stroke-zain-sand/30"
               stroke-width="1"
             />
-            <line x1="250" y1="80" x2="250" y2="170" class="stroke-zain-sand/70" stroke-width="2.5" />
-            <rect x="236" y="96" width="7" height="30" rx="1.5" class="fill-zain-accent/30 stroke-zain-accent" stroke-width="1" />
-            <rect x="257" y="96" width="7" height="30" rx="1.5" class="fill-zain-accent/30 stroke-zain-accent" stroke-width="1" />
-            <rect x="246.5" y="88" width="7" height="30" rx="1.5" class="fill-zain-accent/30 stroke-zain-accent" stroke-width="1" />
-            <circle cx="266" cy="150" r="8" fill="none" class="stroke-zain-accent/80" stroke-width="1.2" />
+            <line
+              x1="250"
+              y1="80"
+              x2="250"
+              y2="170"
+              class="stroke-zain-sand/70"
+              stroke-width="2.5"
+            />
+            <rect
+              x="236"
+              y="96"
+              width="7"
+              height="30"
+              rx="1.5"
+              class="fill-zain-accent/30 stroke-zain-accent"
+              stroke-width="1"
+            />
+            <rect
+              x="257"
+              y="96"
+              width="7"
+              height="30"
+              rx="1.5"
+              class="fill-zain-accent/30 stroke-zain-accent"
+              stroke-width="1"
+            />
+            <rect
+              x="246.5"
+              y="88"
+              width="7"
+              height="30"
+              rx="1.5"
+              class="fill-zain-accent/30 stroke-zain-accent"
+              stroke-width="1"
+            />
+            <circle
+              cx="266"
+              cy="150"
+              r="8"
+              fill="none"
+              class="stroke-zain-accent/80"
+              stroke-width="1.2"
+            />
             <circle cx="250" cy="76" r="3" class="animate-pulse-dot fill-zain-alert" />
             <!-- inclinometer + accelerometer device boxes -->
-            <rect x="243" y="235" width="14" height="10" rx="1.5" class="fill-zain-dark-raised stroke-zain-sand/70" stroke-width="1" />
-            <rect x="244" y="325" width="12" height="10" rx="1.5" class="fill-zain-dark-raised stroke-zain-sand/70" stroke-width="1" />
+            <rect
+              x="243"
+              y="235"
+              width="14"
+              height="10"
+              rx="1.5"
+              class="fill-zain-dark-raised stroke-zain-sand/70"
+              stroke-width="1"
+            />
+            <rect
+              x="244"
+              y="325"
+              width="12"
+              height="10"
+              rx="1.5"
+              class="fill-zain-dark-raised stroke-zain-sand/70"
+              stroke-width="1"
+            />
           </g>
 
           <!-- BTS cabinet + fuel tank -->
           <g>
-            <rect x="320" y="540" width="80" height="80" rx="3" class="fill-zain-dark-raised stroke-zain-sand/70" stroke-width="2" />
-            <line x1="368" y1="544" x2="368" y2="616" class="stroke-zain-sand/40" stroke-width="1" />
+            <rect
+              x="320"
+              y="540"
+              width="80"
+              height="80"
+              rx="3"
+              class="fill-zain-dark-raised stroke-zain-sand/70"
+              stroke-width="2"
+            />
+            <line
+              x1="368"
+              y1="544"
+              x2="368"
+              y2="616"
+              class="stroke-zain-sand/40"
+              stroke-width="1"
+            />
             <circle cx="362" cy="580" r="1.5" class="fill-zain-sand/70" />
-            <line x1="328" y1="552" x2="352" y2="552" class="stroke-zain-accent/60" stroke-width="1" />
-            <line x1="328" y1="557" x2="352" y2="557" class="stroke-zain-accent/60" stroke-width="1" />
-            <line x1="328" y1="562" x2="352" y2="562" class="stroke-zain-accent/60" stroke-width="1" />
-            <rect x="328" y="570" width="24" height="8" rx="1" fill="none" class="stroke-zain-accent/50" stroke-width="1" />
-            <rect x="328" y="584" width="24" height="8" rx="1" fill="none" class="stroke-zain-accent/50" stroke-width="1" />
-            <rect x="405" y="588" width="38" height="32" rx="2" fill="none" class="stroke-zain-sand/50" stroke-width="1.5" />
-            <line x1="424" y1="588" x2="424" y2="582" class="stroke-zain-sand/50" stroke-width="1.5" />
+            <line
+              x1="328"
+              y1="552"
+              x2="352"
+              y2="552"
+              class="stroke-zain-accent/60"
+              stroke-width="1"
+            />
+            <line
+              x1="328"
+              y1="557"
+              x2="352"
+              y2="557"
+              class="stroke-zain-accent/60"
+              stroke-width="1"
+            />
+            <line
+              x1="328"
+              y1="562"
+              x2="352"
+              y2="562"
+              class="stroke-zain-accent/60"
+              stroke-width="1"
+            />
+            <rect
+              x="328"
+              y="570"
+              width="24"
+              height="8"
+              rx="1"
+              fill="none"
+              class="stroke-zain-accent/50"
+              stroke-width="1"
+            />
+            <rect
+              x="328"
+              y="584"
+              width="24"
+              height="8"
+              rx="1"
+              fill="none"
+              class="stroke-zain-accent/50"
+              stroke-width="1"
+            />
+            <rect
+              x="405"
+              y="588"
+              width="38"
+              height="32"
+              rx="2"
+              fill="none"
+              class="stroke-zain-sand/50"
+              stroke-width="1.5"
+            />
+            <line
+              x1="424"
+              y1="588"
+              x2="424"
+              y2="582"
+              class="stroke-zain-sand/50"
+              stroke-width="1.5"
+            />
           </g>
-
         </g>
       </svg>
 
@@ -519,17 +805,19 @@ onUnmounted(() => resizeObs?.disconnect())
         </g>
       </svg>
 
-      <!-- Transition clip player: covers the stage while a clip plays, then we
-           hard-cut to the destination still underneath (seamless if the clip's
-           last frame matches it). Hidden/idle when no clip is playing. -->
-      <video
-        ref="videoEl"
-        v-show="clipPlaying"
-        class="pointer-events-none absolute inset-0 h-full w-full object-contain"
-        muted
-        playsinline
-        preload="auto"
-        disablepictureinpicture
+      <!-- IVG transition player: covers the stage while the baked SVG animates,
+           then we hard-cut to the destination still underneath. -->
+      <ivg-player
+        v-if="clipPlaying"
+        ref="transitionPlayerEl"
+        :src="transitionSrc ?? undefined"
+        fit="contain"
+        background="transparent"
+        seam-fix="false"
+        class="pointer-events-none absolute inset-0 h-full w-full"
+        @load="onTransitionLoad"
+        @end="finishTransition"
+        @error="onTransitionError"
       />
 
       <!-- Floating overlay cards (HTML, registered to the SVG coordinates).
@@ -539,7 +827,12 @@ onUnmounted(() => resizeObs?.disconnect())
         :key="`cards-${viewKey}`"
         class="pointer-events-none absolute inset-0"
       >
-        <div v-for="overlay in overlays" :key="overlay.id" class="absolute" :style="cardStyle(overlay)">
+        <div
+          v-for="overlay in overlays"
+          :key="overlay.id"
+          class="absolute"
+          :style="cardStyle(overlay)"
+        >
           <button
             type="button"
             class="overlay-card animate-fade-up pointer-events-auto text-left transition-colors hover:border-zain-accent"
@@ -553,7 +846,9 @@ onUnmounted(() => resizeObs?.disconnect())
           >
             <p class="flex items-center gap-1.5">
               <span class="status-dot" :class="`status-dot--${overlay.status}`" />
-              <span class="truncate text-[10px] font-semibold uppercase tracking-wider text-zain-light/75">
+              <span
+                class="truncate text-[10px] font-semibold uppercase tracking-wider text-zain-light/75"
+              >
                 {{ overlay.label }}
               </span>
             </p>
@@ -568,7 +863,7 @@ onUnmounted(() => resizeObs?.disconnect())
         </div>
       </div>
 
-      <!-- Transition veil (fallback path only — hidden while a clip is playing) -->
+      <!-- Transition veil (fallback path only — hidden while the IVG player is active) -->
       <div
         v-if="store.transition.playing && !clipPlaying"
         class="absolute inset-0 grid place-items-center"

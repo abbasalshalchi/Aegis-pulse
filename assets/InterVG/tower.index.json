@@ -1,0 +1,62 @@
+{
+ "format": "ivg-manifest",
+ "version": 1,
+ "clips": [
+  {
+   "file": "tower.bts_cam.svg",
+   "camera": "bts cam",
+   "from": "full",
+   "to": "bts",
+   "duration": 0.666667,
+   "motion": {
+    "scale": 0.317,
+    "direction": "out"
+   },
+   "width": 1280,
+   "height": 720,
+   "elements": 2008
+  },
+  {
+   "file": "tower.generator_cam.svg",
+   "camera": "generator cam",
+   "from": null,
+   "to": null,
+   "duration": 0.666667,
+   "motion": {
+    "scale": 0.482,
+    "direction": "out"
+   },
+   "width": 1280,
+   "height": 720,
+   "elements": 2040
+  },
+  {
+   "file": "tower.map_cam.svg",
+   "camera": "map cam",
+   "from": null,
+   "to": null,
+   "duration": 0.666667,
+   "motion": {
+    "scale": 0.373,
+    "direction": "out"
+   },
+   "width": 1280,
+   "height": 720,
+   "elements": 2108
+  },
+  {
+   "file": "tower.tower_cam.svg",
+   "camera": "tower cam",
+   "from": null,
+   "to": null,
+   "duration": 0.666667,
+   "motion": {
+    "scale": 0.488,
+    "direction": "out"
+   },
+   "width": 1280,
+   "height": 720,
+   "elements": 2044
+  }
+ ]
+}

@@ -2,6 +2,16 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
 
+  // <ivg-player> is a native custom element, not a Vue component. Nuxt's key is
+  // `vue.compilerOptions` — nesting it under `vue.template` is the raw
+  // @vitejs/plugin-vue shape, which Nuxt silently ignores, and Vue then warns
+  // that it cannot resolve the component.
+  vue: {
+    compilerOptions: {
+      isCustomElement: (tag) => tag === 'ivg-player',
+    },
+  },
+
   modules: ['@pinia/nuxt', '@nuxtjs/tailwindcss'],
 
   app: {
